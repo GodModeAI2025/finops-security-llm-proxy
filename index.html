@@ -1,0 +1,853 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>LLM API Proxy — Self-Learning Multi-Cloud Gateway</title>
+  <meta name="description" content="Ein selbstlernendes API-Gateway für LLM-Provider mit adaptiver Budgetierung, deployed auf GCP, Cloudflare und AWS.">
+  <style>
+    *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+    :root {
+      --bg: #0d1117;
+      --surface: #161b22;
+      --surface-2: #1c2333;
+      --border: #30363d;
+      --text: #e6edf3;
+      --text-muted: #8b949e;
+      --accent: #58a6ff;
+      --accent-2: #3fb950;
+      --orange: #d29922;
+      --purple: #bc8cff;
+      --red: #f85149;
+      --gradient-1: linear-gradient(135deg, #58a6ff 0%, #bc8cff 100%);
+      --gradient-2: linear-gradient(135deg, #3fb950 0%, #58a6ff 100%);
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.6;
+      overflow-x: hidden;
+    }
+
+    a { color: var(--accent); text-decoration: none; transition: color .2s; }
+    a:hover { color: #79c0ff; }
+
+    /* ── Hero ───────────────────────────────── */
+    .hero {
+      text-align: center;
+      padding: 80px 24px 60px;
+      background: radial-gradient(ellipse at 50% 0%, rgba(88,166,255,.12) 0%, transparent 60%);
+    }
+    .hero .badge {
+      display: inline-block;
+      background: rgba(248,81,73,.15);
+      color: var(--red);
+      font-size: .75rem;
+      font-weight: 600;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+      padding: 4px 14px;
+      border-radius: 20px;
+      border: 1px solid rgba(248,81,73,.3);
+      margin-bottom: 20px;
+    }
+    .hero h1 {
+      font-size: clamp(2rem, 5vw, 3.2rem);
+      font-weight: 800;
+      background: var(--gradient-1);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+      margin-bottom: 16px;
+    }
+    .hero .subtitle {
+      font-size: clamp(1rem, 2.5vw, 1.25rem);
+      color: var(--text-muted);
+      max-width: 720px;
+      margin: 0 auto 32px;
+    }
+    .hero-actions {
+      display: flex;
+      gap: 12px;
+      justify-content: center;
+      flex-wrap: wrap;
+    }
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 12px 28px;
+      border-radius: 8px;
+      font-size: .95rem;
+      font-weight: 600;
+      transition: transform .15s, box-shadow .2s;
+      border: none;
+      cursor: pointer;
+    }
+    .btn:hover { transform: translateY(-1px); }
+    .btn-primary {
+      background: var(--gradient-1);
+      color: #fff;
+      box-shadow: 0 4px 20px rgba(88,166,255,.25);
+    }
+    .btn-secondary {
+      background: var(--surface);
+      color: var(--text);
+      border: 1px solid var(--border);
+    }
+
+    /* ── Container ──────────────────────────── */
+    .container { max-width: 1100px; margin: 0 auto; padding: 0 24px; }
+
+    /* ── Section ────────────────────────────── */
+    section { padding: 64px 0; }
+    .section-title {
+      font-size: 1.6rem;
+      font-weight: 700;
+      text-align: center;
+      margin-bottom: 12px;
+    }
+    .section-subtitle {
+      text-align: center;
+      color: var(--text-muted);
+      max-width: 600px;
+      margin: 0 auto 48px;
+    }
+
+    /* ── Feature Grid ───────────────────────── */
+    .features {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 20px;
+    }
+    .feature-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 28px;
+      transition: border-color .2s, transform .2s;
+    }
+    .feature-card:hover {
+      border-color: var(--accent);
+      transform: translateY(-2px);
+    }
+    .feature-icon {
+      width: 40px;
+      height: 40px;
+      border-radius: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1.2rem;
+      margin-bottom: 16px;
+      font-weight: 700;
+    }
+    .feature-card h3 { font-size: 1.05rem; margin-bottom: 8px; }
+    .feature-card p { font-size: .9rem; color: var(--text-muted); }
+
+    /* ── Platforms ───────────────────────────── */
+    .platforms {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+      gap: 24px;
+    }
+    .platform-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 32px 28px;
+      position: relative;
+      overflow: hidden;
+    }
+    .platform-card::before {
+      content: '';
+      position: absolute;
+      top: 0; left: 0; right: 0;
+      height: 3px;
+    }
+    .platform-card.gcp::before { background: linear-gradient(90deg, #4285f4, #34a853, #fbbc05, #ea4335); }
+    .platform-card.cf::before { background: linear-gradient(90deg, #f6821f, #faad3f); }
+    .platform-card.aws::before { background: linear-gradient(90deg, #ff9900, #232f3e); }
+
+    .platform-header {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      margin-bottom: 20px;
+    }
+    .platform-logo {
+      width: 44px;
+      height: 44px;
+      border-radius: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1.4rem;
+      font-weight: 800;
+      flex-shrink: 0;
+    }
+    .platform-logo.gcp { background: rgba(66,133,244,.15); color: #4285f4; }
+    .platform-logo.cf  { background: rgba(246,130,31,.15); color: #f6821f; }
+    .platform-logo.aws { background: rgba(255,153,0,.15);  color: #ff9900; }
+
+    .platform-card h3 { font-size: 1.15rem; }
+    .platform-card .platform-sub { font-size: .82rem; color: var(--text-muted); }
+
+    .platform-specs {
+      list-style: none;
+      margin-top: 16px;
+    }
+    .platform-specs li {
+      display: flex;
+      justify-content: space-between;
+      padding: 8px 0;
+      border-bottom: 1px solid var(--border);
+      font-size: .88rem;
+    }
+    .platform-specs li:last-child { border-bottom: none; }
+    .platform-specs .label { color: var(--text-muted); }
+    .platform-specs .value { font-weight: 600; text-align: right; }
+
+    /* ── Adaptive Section ───────────────────── */
+    .adaptive-flow {
+      display: flex;
+      gap: 0;
+      align-items: stretch;
+      justify-content: center;
+      flex-wrap: wrap;
+      margin-top: 8px;
+    }
+    .flow-step {
+      flex: 1;
+      min-width: 200px;
+      max-width: 300px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 24px 20px;
+      text-align: center;
+      position: relative;
+    }
+    .flow-step + .flow-step { margin-left: 32px; }
+    .flow-step + .flow-step::before {
+      content: '\2192';
+      position: absolute;
+      left: -24px;
+      top: 50%;
+      transform: translateY(-50%);
+      font-size: 1.4rem;
+      color: var(--text-muted);
+    }
+    .flow-step .step-num {
+      display: inline-block;
+      background: rgba(88,166,255,.15);
+      color: var(--accent);
+      font-size: .75rem;
+      font-weight: 700;
+      padding: 2px 10px;
+      border-radius: 12px;
+      margin-bottom: 10px;
+    }
+    .flow-step h4 { font-size: .95rem; margin-bottom: 6px; }
+    .flow-step p { font-size: .82rem; color: var(--text-muted); }
+
+    /* ── Provider Table ──────────────────────── */
+    .provider-table {
+      width: 100%;
+      border-collapse: collapse;
+      background: var(--surface);
+      border-radius: 12px;
+      overflow: hidden;
+      border: 1px solid var(--border);
+    }
+    .provider-table th, .provider-table td {
+      padding: 12px 16px;
+      text-align: left;
+      font-size: .88rem;
+      border-bottom: 1px solid var(--border);
+    }
+    .provider-table th {
+      background: var(--surface-2);
+      font-weight: 600;
+      color: var(--text-muted);
+      font-size: .78rem;
+      text-transform: uppercase;
+      letter-spacing: .05em;
+    }
+    .provider-table tr:last-child td { border-bottom: none; }
+    .provider-table .model-name { font-family: 'SF Mono', Consolas, monospace; font-weight: 600; }
+    .provider-badge {
+      display: inline-block;
+      font-size: .72rem;
+      font-weight: 600;
+      padding: 2px 8px;
+      border-radius: 6px;
+    }
+    .provider-badge.anthropic { background: rgba(188,140,255,.15); color: var(--purple); }
+    .provider-badge.openai    { background: rgba(63,185,80,.15);   color: var(--accent-2); }
+    .provider-badge.google    { background: rgba(88,166,255,.15);  color: var(--accent); }
+
+    /* ── Client Preview ──────────────────────── */
+    .client-section {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 40px 32px;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 40px;
+      align-items: center;
+    }
+    .client-info h3 { font-size: 1.3rem; margin-bottom: 12px; }
+    .client-info p { color: var(--text-muted); font-size: .92rem; margin-bottom: 16px; }
+    .client-features {
+      list-style: none;
+    }
+    .client-features li {
+      padding: 6px 0;
+      font-size: .88rem;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .client-features li::before {
+      content: '\2713';
+      color: var(--accent-2);
+      font-weight: 700;
+    }
+    .client-mock {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 20px;
+      font-family: 'SF Mono', Consolas, monospace;
+      font-size: .78rem;
+      color: var(--text-muted);
+      line-height: 1.8;
+    }
+    .client-mock .cmd { color: var(--accent-2); }
+    .client-mock .out { color: var(--text); }
+    .client-mock .dim { color: #484f58; }
+
+    /* ── Architecture ────────────────────────── */
+    .arch-diagram {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 32px;
+      font-family: 'SF Mono', Consolas, monospace;
+      font-size: .82rem;
+      line-height: 1.7;
+      overflow-x: auto;
+      color: var(--text-muted);
+      white-space: pre;
+      text-align: center;
+    }
+    .arch-diagram .hl { color: var(--accent); font-weight: 600; }
+    .arch-diagram .hl2 { color: var(--accent-2); font-weight: 600; }
+    .arch-diagram .hl3 { color: var(--orange); font-weight: 600; }
+    .arch-diagram .hl4 { color: var(--purple); font-weight: 600; }
+
+    /* ── Quickstart ──────────────────────────── */
+    .quickstart-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+      gap: 20px;
+    }
+    .qs-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 24px;
+    }
+    .qs-card h4 {
+      font-size: .95rem;
+      margin-bottom: 12px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .qs-card pre {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 14px 16px;
+      font-size: .82rem;
+      line-height: 1.6;
+      overflow-x: auto;
+      color: var(--accent-2);
+    }
+
+    /* ── Comparison Table ────────────────────── */
+    .comparison-wrapper {
+      overflow-x: auto;
+      border-radius: 12px;
+      border: 1px solid var(--border);
+    }
+    .comparison-table {
+      width: 100%;
+      border-collapse: collapse;
+      background: var(--surface);
+      min-width: 640px;
+    }
+    .comparison-table th, .comparison-table td {
+      padding: 12px 16px;
+      text-align: left;
+      font-size: .85rem;
+      border-bottom: 1px solid var(--border);
+    }
+    .comparison-table th {
+      background: var(--surface-2);
+      font-weight: 600;
+      color: var(--text-muted);
+      font-size: .78rem;
+      text-transform: uppercase;
+      letter-spacing: .04em;
+    }
+    .comparison-table tr:last-child td { border-bottom: none; }
+    .comparison-table td:first-child {
+      color: var(--text-muted);
+      font-weight: 500;
+    }
+    .yes { color: var(--accent-2); }
+    .no  { color: var(--text-muted); }
+
+    /* ── Footer ──────────────────────────────── */
+    footer {
+      border-top: 1px solid var(--border);
+      padding: 40px 24px;
+      text-align: center;
+      color: var(--text-muted);
+      font-size: .85rem;
+    }
+    footer .footer-links {
+      display: flex;
+      justify-content: center;
+      gap: 24px;
+      margin-bottom: 16px;
+      flex-wrap: wrap;
+    }
+    footer .footer-links a {
+      color: var(--text-muted);
+      transition: color .2s;
+    }
+    footer .footer-links a:hover { color: var(--text); }
+
+    /* ── Responsive ──────────────────────────── */
+    @media (max-width: 768px) {
+      .client-section { grid-template-columns: 1fr; }
+      .flow-step + .flow-step { margin-left: 0; margin-top: 16px; }
+      .flow-step + .flow-step::before { display: none; }
+      .adaptive-flow { flex-direction: column; align-items: center; }
+      .hero { padding: 48px 16px 40px; }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- ═══ Hero ═══ -->
+  <header class="hero">
+    <div class="badge">Experimental</div>
+    <h1>LLM API Proxy</h1>
+    <p class="subtitle">
+      Ein selbstlernendes API-Gateway, das echte LLM-API-Keys kapselt, eigene Proxy-Tokens vergibt
+      und Budgets automatisch via P90-Analyse optimiert &mdash; deployed auf drei Cloud-Plattformen.
+    </p>
+    <div class="hero-actions">
+      <a href="https://github.com/GodModeAI2025/llm-proxy-complete" class="btn btn-primary">
+        <svg width="18" height="18" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+        GitHub Repository
+      </a>
+      <a href="#quickstart" class="btn btn-secondary">Quickstart</a>
+    </div>
+  </header>
+
+  <!-- ═══ Features ═══ -->
+  <section>
+    <div class="container">
+      <h2 class="section-title">Kernfunktionen</h2>
+      <p class="section-subtitle">Enterprise-Features in einem experimentellen Proof-of-Concept</p>
+      <div class="features">
+        <div class="feature-card">
+          <div class="feature-icon" style="background:rgba(188,140,255,.12);color:var(--purple);">P90</div>
+          <h3>Selbstlernende Budgets</h3>
+          <p>Limits werden automatisch aus historischen Sessions berechnet. Ab 5 Datenpunkten greift die P90-Perzentilanalyse mit 10% Sicherheitsmarge.</p>
+        </div>
+        <div class="feature-card">
+          <div class="feature-icon" style="background:rgba(248,81,73,.12);color:var(--red);">&#x26A0;</div>
+          <h3>Auto-Revocation</h3>
+          <p>Tokens werden automatisch revoziert bei Budget-Limit, TTL-Ablauf oder Fehler-Streak &mdash; serverseitig bei jedem Request geprüft.</p>
+        </div>
+        <div class="feature-card">
+          <div class="feature-icon" style="background:rgba(63,185,80,.12);color:var(--accent-2);">$</div>
+          <h3>Exakte Kostenanalyse</h3>
+          <p>Pro Request: Input/Output-Tokens &times; Provider-Preis. Aggregiert als Min/Max/Durchschnitt/Median/P90 pro Themenfeld.</p>
+        </div>
+        <div class="feature-card">
+          <div class="feature-icon" style="background:rgba(88,166,255,.12);color:var(--accent);">&#x21C4;</div>
+          <h3>Multi-Provider Proxy</h3>
+          <p>Anthropic (Claude), OpenAI (GPT-4o), Google (Gemini) &mdash; einheitliche API, transparenter Provider-Wechsel per Model-Prefix.</p>
+        </div>
+        <div class="feature-card">
+          <div class="feature-icon" style="background:rgba(210,153,34,.12);color:var(--orange);">&#x25B6;</div>
+          <h3>Streaming-Support</h3>
+          <p>SSE-Streaming mit Usage-Extraktion aus dem Stream (GCP &amp; Cloudflare). Echtzeit-Antworten mit korrekter Kostenerfassung.</p>
+        </div>
+        <div class="feature-card">
+          <div class="feature-icon" style="background:rgba(88,166,255,.12);color:var(--accent);">&#x2601;</div>
+          <h3>3 Cloud-Plattformen</h3>
+          <p>Identische API-Oberfläche auf GCP Cloud Run, Cloudflare Workers und AWS Lambda. Austauschbar ohne Client-Änderungen.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══ Platforms ═══ -->
+  <section style="background:var(--surface-2);">
+    <div class="container">
+      <h2 class="section-title">Drei Backends, eine API</h2>
+      <p class="section-subtitle">Jedes Backend implementiert den identischen Funktionsumfang mit plattformnativen Services</p>
+      <div class="platforms">
+
+        <div class="platform-card gcp">
+          <div class="platform-header">
+            <div class="platform-logo gcp">G</div>
+            <div>
+              <h3>GCP Cloud Run</h3>
+              <span class="platform-sub">Express.js + Firestore</span>
+            </div>
+          </div>
+          <ul class="platform-specs">
+            <li><span class="label">Code</span><span class="value">~1.734 Zeilen TypeScript</span></li>
+            <li><span class="label">Datenbank</span><span class="value">Firestore (Native)</span></li>
+            <li><span class="label">Atomare Zähler</span><span class="value">Firestore Transactions</span></li>
+            <li><span class="label">Secrets</span><span class="value">GCP Secret Manager</span></li>
+            <li><span class="label">Cron</span><span class="value">Cloud Scheduler (5 min)</span></li>
+            <li><span class="label">Streaming</span><span class="value" style="color:var(--accent-2);">Ja (SSE)</span></li>
+            <li><span class="label">Cold Start</span><span class="value">~200ms (min=1)</span></li>
+            <li><span class="label">Kosten</span><span class="value">~$16-20/Monat</span></li>
+          </ul>
+        </div>
+
+        <div class="platform-card cf">
+          <div class="platform-header">
+            <div class="platform-logo cf">CF</div>
+            <div>
+              <h3>Cloudflare Workers</h3>
+              <span class="platform-sub">Workers + KV + Durable Objects</span>
+            </div>
+          </div>
+          <ul class="platform-specs">
+            <li><span class="label">Code</span><span class="value">~1.293 Zeilen TypeScript</span></li>
+            <li><span class="label">Datenbank</span><span class="value">KV + Durable Objects</span></li>
+            <li><span class="label">Atomare Zähler</span><span class="value">Durable Objects</span></li>
+            <li><span class="label">Secrets</span><span class="value">Wrangler Secrets</span></li>
+            <li><span class="label">Cron</span><span class="value">Cron Triggers (5 min)</span></li>
+            <li><span class="label">Streaming</span><span class="value" style="color:var(--accent-2);">Ja (TransformStream)</span></li>
+            <li><span class="label">Cold Start</span><span class="value">0ms</span></li>
+            <li><span class="label">Kosten</span><span class="value">~$5-10/Monat</span></li>
+          </ul>
+        </div>
+
+        <div class="platform-card aws">
+          <div class="platform-header">
+            <div class="platform-logo aws">&#x03BB;</div>
+            <div>
+              <h3>AWS Lambda</h3>
+              <span class="platform-sub">Lambda + DynamoDB + CDK</span>
+            </div>
+          </div>
+          <ul class="platform-specs">
+            <li><span class="label">Code</span><span class="value">~1.065 Zeilen TypeScript</span></li>
+            <li><span class="label">Datenbank</span><span class="value">DynamoDB (Single-Table)</span></li>
+            <li><span class="label">Atomare Zähler</span><span class="value">UpdateExpression</span></li>
+            <li><span class="label">Secrets</span><span class="value">Secrets Manager</span></li>
+            <li><span class="label">Cron</span><span class="value">EventBridge (5 min)</span></li>
+            <li><span class="label">Streaming</span><span class="value" style="color:var(--text-muted);">Nein (API GW Limit)</span></li>
+            <li><span class="label">Cold Start</span><span class="value">~300-800ms</span></li>
+            <li><span class="label">Kosten</span><span class="value">~$5-15/Monat</span></li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══ Adaptive Budgets ═══ -->
+  <section>
+    <div class="container">
+      <h2 class="section-title">Adaptive Budgetierung</h2>
+      <p class="section-subtitle">Das System lernt aus jeder Session, welche Ressourcen ein Themenfeld tatsächlich benötigt</p>
+      <div class="adaptive-flow">
+        <div class="flow-step">
+          <span class="step-num">Stufe 1</span>
+          <h4>Unbekanntes Thema</h4>
+          <p>Keine historischen Daten. Defaults: max 50 min, $50 Budget.</p>
+        </div>
+        <div class="flow-step">
+          <span class="step-num">Stufe 2</span>
+          <h4>1&ndash;4 Sessions</h4>
+          <p>Limit = Max(bisherige Werte) &times; 1,10 Sicherheitsmarge.</p>
+        </div>
+        <div class="flow-step">
+          <span class="step-num">Stufe 3</span>
+          <h4>5+ Sessions</h4>
+          <p>Limit = P90-Perzentil &times; 1,10. Outlier werden ignoriert.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══ Architecture ═══ -->
+  <section style="background:var(--surface-2);">
+    <div class="container">
+      <h2 class="section-title">Architektur</h2>
+      <p class="section-subtitle">Request-Pipeline vom Client bis zum LLM-Provider</p>
+      <div class="arch-diagram"><span class="dim">┌─────────────────────────────────────────────────────────────────────────┐</span>
+<span class="dim">│</span>                        <span class="hl4">Electron PoC Client</span>                             <span class="dim">│</span>
+<span class="dim">│</span>       Config &rarr; Session &rarr; Chat &rarr; Stats &rarr; Session Complete         <span class="dim">│</span>
+<span class="dim">└────────────────────────────────┬────────────────────────────────────────┘</span>
+                                 <span class="dim">│</span>  <span class="hl">Einheitliche API</span>
+                                 <span class="dim">▼</span>
+<span class="dim">┌────────────────────────────────────────────────────────────────────────┐</span>
+<span class="dim">│</span>                         <span class="hl">LLM API Proxy</span>                                 <span class="dim">│</span>
+<span class="dim">│</span>  <span class="hl2">POST /v1/session</span>    <span class="hl2">POST /v1/chat</span>    <span class="hl2">GET /admin/*</span>              <span class="dim">│</span>
+<span class="dim">│</span>                                                                        <span class="dim">│</span>
+<span class="dim">│</span>  Token Validation &rarr; Rules Check &rarr; Provider Resolve &rarr; Forward      <span class="dim">│</span>
+<span class="dim">│</span>        &darr;                                                    &darr;          <span class="dim">│</span>
+<span class="dim">│</span>  <span class="hl3">Adaptive Engine</span>        Usage Track &rarr; Auto-Revoke Check           <span class="dim">│</span>
+<span class="dim">│</span>  P90 &bull; Max &bull; Default                                                <span class="dim">│</span>
+<span class="dim">└─────────┬─────────────────────┬──────────────────────┬─────────────────┘</span>
+          <span class="dim">│</span>                     <span class="dim">│</span>                      <span class="dim">│</span>
+  <span class="hl">GCP Cloud Run</span>      <span class="hl3">Cloudflare Workers</span>      <span class="hl2">AWS Lambda</span>
+  Firestore            KV + DO               DynamoDB
+  Secret Manager       Wrangler Secrets      Secrets Manager
+  Cloud Scheduler      Cron Triggers         EventBridge
+          <span class="dim">│</span>                     <span class="dim">│</span>                      <span class="dim">│</span>
+          <span class="dim">└─────────────────────┼──────────────────────┘</span>
+                                <span class="dim">│</span>
+                                <span class="dim">▼</span>
+<span class="dim">┌────────────────────────────────────────────────────────────────────────┐</span>
+<span class="dim">│</span>               <span class="hl4">LLM Provider APIs</span>                                      <span class="dim">│</span>
+<span class="dim">│</span>     Anthropic (Claude)  &bull;  OpenAI (GPT-4o)  &bull;  Google (Gemini)       <span class="dim">│</span>
+<span class="dim">└────────────────────────────────────────────────────────────────────────┘</span></div>
+    </div>
+  </section>
+
+  <!-- ═══ Providers ═══ -->
+  <section>
+    <div class="container">
+      <h2 class="section-title">Unterstützte Modelle</h2>
+      <p class="section-subtitle">8 Modelle von 3 Providern mit exakten Preistabellen</p>
+      <div class="comparison-wrapper">
+        <table class="provider-table">
+          <thead>
+            <tr>
+              <th>Modell</th>
+              <th>Provider</th>
+              <th>Input / 1M Tokens</th>
+              <th>Output / 1M Tokens</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td class="model-name">claude-opus-4</td>
+              <td><span class="provider-badge anthropic">Anthropic</span></td>
+              <td>$15.00</td>
+              <td>$75.00</td>
+            </tr>
+            <tr>
+              <td class="model-name">claude-sonnet-4</td>
+              <td><span class="provider-badge anthropic">Anthropic</span></td>
+              <td>$3.00</td>
+              <td>$15.00</td>
+            </tr>
+            <tr>
+              <td class="model-name">claude-haiku-4.5</td>
+              <td><span class="provider-badge anthropic">Anthropic</span></td>
+              <td>$0.80</td>
+              <td>$4.00</td>
+            </tr>
+            <tr>
+              <td class="model-name">gpt-4o</td>
+              <td><span class="provider-badge openai">OpenAI</span></td>
+              <td>$2.50</td>
+              <td>$10.00</td>
+            </tr>
+            <tr>
+              <td class="model-name">gpt-4o-mini</td>
+              <td><span class="provider-badge openai">OpenAI</span></td>
+              <td>$0.15</td>
+              <td>$0.60</td>
+            </tr>
+            <tr>
+              <td class="model-name">o3-mini</td>
+              <td><span class="provider-badge openai">OpenAI</span></td>
+              <td>$1.10</td>
+              <td>$4.40</td>
+            </tr>
+            <tr>
+              <td class="model-name">gemini-2.0-flash</td>
+              <td><span class="provider-badge google">Google</span></td>
+              <td>$0.10</td>
+              <td>$0.40</td>
+            </tr>
+            <tr>
+              <td class="model-name">gemini-2.5-pro</td>
+              <td><span class="provider-badge google">Google</span></td>
+              <td>$1.25</td>
+              <td>$10.00</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══ Client ═══ -->
+  <section style="background:var(--surface-2);">
+    <div class="container">
+      <h2 class="section-title">Electron PoC Client</h2>
+      <p class="section-subtitle">Demo-Client zum Testen aller Proxy-Funktionen</p>
+      <div class="client-section">
+        <div class="client-info">
+          <h3>Vollständiger Test-Client</h3>
+          <p>Der Electron-Client bietet eine 5-Screen-Oberfläche zum interaktiven Testen aller Backend-Varianten &mdash; inklusive Live-Monitoring von Budget und TTL.</p>
+          <ul class="client-features">
+            <li>Backend-Preset-Wechsel (GCP / Cloudflare / AWS)</li>
+            <li>Live-Timer und Budget-Countdown</li>
+            <li>Adaptive Limits aus Server-Antwort</li>
+            <li>Session-Feedback (Erfolg/Fehler)</li>
+            <li>Statistik-Dashboard mit P90-Analyse</li>
+            <li>Request-Logging und Fehlerdiagnose</li>
+          </ul>
+        </div>
+        <div class="client-mock">
+<span class="dim"># Quickstart</span>
+<span class="cmd">$ cd</span> client/electron-app
+<span class="cmd">$ npm</span> install
+<span class="cmd">$ npm</span> start
+
+<span class="dim"># Die App startet mit:</span>
+<span class="out">1. Proxy-URL eingeben</span>
+<span class="out">2. Admin-Key setzen</span>
+<span class="out">3. Themenfeld wählen (z.B. "code-review")</span>
+<span class="out">4. Chat starten &mdash; Timer + Budget live</span>
+<span class="out">5. Session beenden &rarr; Messpunkt gespeichert</span>
+<span class="out">6. Nächste Session &rarr; Limits adaptiv</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══ Quickstart ═══ -->
+  <section id="quickstart">
+    <div class="container">
+      <h2 class="section-title">Quickstart</h2>
+      <p class="section-subtitle">Ein Backend aussuchen, deployen, Client starten</p>
+      <div class="quickstart-grid">
+        <div class="qs-card">
+          <h4><span style="color:var(--accent);">01</span> GCP Cloud Run</h4>
+          <pre>cd backends/gcp-cloud-run
+npm install
+chmod +x deploy.sh
+./deploy.sh</pre>
+        </div>
+        <div class="qs-card">
+          <h4><span style="color:var(--orange);">02</span> Cloudflare Workers</h4>
+          <pre>cd backends/cloudflare-workers
+npm install
+npx wrangler deploy</pre>
+        </div>
+        <div class="qs-card">
+          <h4><span style="color:var(--accent-2);">03</span> AWS Lambda</h4>
+          <pre>cd backends/aws-lambda
+npm install
+npx cdk deploy</pre>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══ Comparison ═══ -->
+  <section style="background:var(--surface-2);">
+    <div class="container">
+      <h2 class="section-title">Plattformvergleich</h2>
+      <div class="comparison-wrapper">
+        <table class="comparison-table">
+          <thead>
+            <tr>
+              <th></th>
+              <th>GCP Cloud Run</th>
+              <th>Cloudflare Workers</th>
+              <th>AWS Lambda</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Codeumfang</td>
+              <td>1.734 Zeilen</td>
+              <td>1.293 Zeilen</td>
+              <td>1.065 Zeilen</td>
+            </tr>
+            <tr>
+              <td>Datenbank</td>
+              <td>Firestore</td>
+              <td>KV + Durable Objects</td>
+              <td>DynamoDB</td>
+            </tr>
+            <tr>
+              <td>Streaming</td>
+              <td class="yes">Ja (SSE)</td>
+              <td class="yes">Ja (TransformStream)</td>
+              <td class="no">Nein</td>
+            </tr>
+            <tr>
+              <td>Cold Start</td>
+              <td>~200ms</td>
+              <td>0ms</td>
+              <td>~300-800ms</td>
+            </tr>
+            <tr>
+              <td>Kosten/Monat</td>
+              <td>~$16-20</td>
+              <td>~$5-10</td>
+              <td>~$5-15</td>
+            </tr>
+            <tr>
+              <td>Deploy</td>
+              <td>deploy.sh</td>
+              <td>wrangler deploy</td>
+              <td>cdk deploy</td>
+            </tr>
+            <tr>
+              <td>IaC</td>
+              <td>Shell Script</td>
+              <td>wrangler.toml</td>
+              <td>CDK Stack</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══ Footer ═══ -->
+  <footer>
+    <div class="footer-links">
+      <a href="https://github.com/GodModeAI2025/llm-proxy-complete">Repository</a>
+      <a href="https://github.com/GodModeAI2025/llm-proxy-complete/tree/main/docs">Dokumentation</a>
+      <a href="https://github.com/GodModeAI2025/llm-proxy-complete/tree/main/diagrams">Diagramme</a>
+      <a href="https://github.com/GodModeAI2025/llm-proxy-complete/blob/main/LICENSE">Lizenz (Apache 2.0)</a>
+      <a href="https://github.com/GodModeAI2025/MarkZimmermann">Impressum</a>
+    </div>
+    <p>&copy; 2025 Mark Zimmermann &mdash; Apache License 2.0</p>
+    <p style="margin-top:8px;font-size:.78rem;color:#484f58;">
+      Experimental &mdash; Dieses Projekt ist ein Proof-of-Concept und nicht für den Produktiveinsatz bestimmt.
+    </p>
+  </footer>
+
+</body>
+</html>
