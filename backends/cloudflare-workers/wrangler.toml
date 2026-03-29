@@ -1,0 +1,32 @@
+name = "llm-proxy"
+main = "src/index.ts"
+compatibility_date = "2024-12-01"
+compatibility_flags = ["nodejs_compat"]
+
+# ── KV Namespaces ───────────────────────────────────────────
+[[kv_namespaces]]
+binding = "TOKENS"
+id = "REPLACE_WITH_KV_ID"
+
+# ── Durable Objects ─────────────────────────────────────────
+[durable_objects]
+bindings = [
+  { name = "USAGE_COUNTER", class_name = "UsageCounter" }
+]
+
+[[migrations]]
+tag = "v1"
+new_classes = ["UsageCounter"]
+
+# ── Secrets (set via: wrangler secret put SECRET_NAME) ──────
+# ANTHROPIC_API_KEY
+# OPENAI_API_KEY
+# ADMIN_KEY
+
+# ── Cron Triggers (TTL Cleanup) ─────────────────────────────
+[triggers]
+crons = ["*/5 * * * *"]
+
+# ── Environment ─────────────────────────────────────────────
+[vars]
+ENVIRONMENT = "production"

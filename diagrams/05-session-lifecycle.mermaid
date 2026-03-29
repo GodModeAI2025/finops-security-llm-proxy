@@ -1,0 +1,82 @@
+---
+title: "Session-Lifecycle — Sequenzdiagramm"
+---
+sequenceDiagram
+    participant C as Electron Client
+    participant P as LLM Proxy
+    participant DB as Datenbank
+    participant TP as Topic Profiler
+    participant LLM as LLM Provider
+
+    Note over C,LLM: Phase 1 — Session eröffnen
+
+    C->>P: POST /v1/session<br/>{topic: "code-review", model: "claude-sonnet-4"}
+    P->>DB: Topic-Profil laden<br/>topics/code-review:claude-sonnet-4
+    DB-->>P: Profil (8 Datenpunkte)
+    P->>TP: calculateLimits(profil)
+    Note over TP: P90(Kosten) = 4.80<br/>× 1.10 = 5.28 €<br/>min(5.28, 50) = 5.28 €
+    TP-->>P: {budget: 5.28€, duration: 5.8min, source: "adaptive_p90"}
+    P->>DB: Token erstellen<br/>ptk_abc123<br/>TTL = now + 5.8min<br/>Budget = 5.28 €
+    P->>DB: Session-Meta speichern<br/>ses_xyz789 → ptk_abc123
+    P-->>C: {session_id, token: "ptk_abc123",<br/>limits: {5.28€, 5.8min},<br/>stats: {min: 1.20, avg: 3.10, max: 12.50}}
+
+    Note over C,LLM: Phase 2 — Requests senden
+
+    C->>P: POST /v1/chat<br/>Authorization: Bearer ptk_abc123<br/>{model: "claude-sonnet-4", messages: [...]}
+    P->>DB: Token laden + validieren
+    Note over P: ✓ Status: active<br/>✓ TTL: 4:32 verbleibend<br/>✓ Budget: 0.00 < 5.28<br/>✓ Scope: model erlaubt
+    P->>DB: API-Key auflösen<br/>(Secret Manager)
+    P->>LLM: POST /v1/messages<br/>Authorization: Bearer sk-ant-...<br/>{model, messages, max_tokens}
+    LLM-->>P: {content: [...], usage: {input: 850, output: 320}}
+    P->>P: Kosten berechnen<br/>(850×3 + 320×15) / 1M = $0.0074
+    P->>DB: Usage atomar updaten<br/>total_cost += 0.0074<br/>total_requests += 1<br/>fail_streak = 0
+    P->>P: Auto-Revoke Check<br/>0.0074 < 5.28 ✓<br/>0 < 10 ✓
+    P-->>C: LLM Response<br/>X-Proxy-Usage: {cost: 0.0074,<br/>total: 0.0074, remaining: 5.27}
+
+    C->>P: POST /v1/chat (Request 2)
+    P->>DB: Token + TTL + Budget prüfen
+    P->>LLM: Forward
+    LLM-->>P: Response + Usage
+    P->>DB: Usage updaten (total: 0.0153)
+    P-->>C: Response + X-Proxy-Usage
+
+    Note over C,LLM: Phase 3a — Client beendet aktiv
+
+    C->>P: POST /v1/session/ses_xyz789/complete<br/>{success: true}
+    P->>DB: Session-Meta laden<br/>→ token_id: ptk_abc123
+    P->>DB: Usage laden<br/>total_cost: 0.0153, requests: 2
+    P->>DB: Token revoken<br/>status: "revoked"<br/>reason: "session_completed_success"
+    P->>TP: recordAndRecalculate()<br/>{duration: 2.3min, cost: 0.0153, success: true}
+    Note over TP: Neuer Datenpunkt #9<br/>P90 neu berechnet<br/>Limits ggf. gesenkt
+    TP->>DB: Profil + Stats updaten
+    TP-->>P: Aktualisiertes Profil
+    P-->>C: {completed: true,<br/>actual: {2.3min, $0.0153, 2 req},<br/>new_limits: {budget: 4.95€},<br/>stats: {min: 0.02, avg: 2.80, p90: 4.60}}
+
+    Note over C,LLM: Phase 3b — Alternative: TTL läuft ab
+
+    rect rgb(252, 235, 235)
+        Note over C,P: Client meldet sich NICHT
+        P->>P: Nächster Request nach TTL-Ablauf
+        P->>DB: Token laden
+        Note over P: TTL abgelaufen!
+        P->>DB: Token revoken<br/>reason: "ttl_expired"
+        P-->>C: 403 {error: "token_expired"}
+    end
+
+    Note over C,LLM: Phase 3c — Alternative: Budget aufgebraucht
+
+    rect rgb(250, 238, 218)
+        C->>P: POST /v1/chat
+        P->>DB: Token + Usage laden
+        Note over P: total_cost ≥ max_budget!
+        P->>DB: Token revoken<br/>reason: "budget_exceeded"
+        P-->>C: 403 {error: "budget_exceeded"}
+    end
+
+    Note over C,LLM: Proaktiver Cleanup (unabhängig)
+
+    rect rgb(238, 237, 254)
+        Note over P: Cron alle 5 Minuten
+        P->>DB: Query: TTL abgelaufen<br/>AND status = active
+        P->>DB: Batch-Revoke
+    end

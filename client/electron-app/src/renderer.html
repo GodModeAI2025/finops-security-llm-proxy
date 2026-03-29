@@ -1,0 +1,911 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<title>LLM Proxy Client</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, sans-serif;
+    background: #f5f5f0;
+    color: #1a1a1a;
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+  }
+
+  /* ── Header ─────────────────────────────── */
+  header {
+    background: #1a1a1a;
+    color: #fff;
+    padding: 12px 20px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    -webkit-app-region: drag;
+  }
+  header h1 { font-size: 16px; font-weight: 500; }
+  header .status {
+    font-size: 12px;
+    padding: 3px 10px;
+    border-radius: 12px;
+    background: #333;
+  }
+  header .status.connected { background: #0F6E56; }
+  header .status.session { background: #185FA5; }
+
+  /* ── Main area ──────────────────────────── */
+  main {
+    flex: 1;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .screen { display: none; flex-direction: column; height: 100%; }
+  .screen.active { display: flex; }
+
+  /* ── Config screen ──────────────────────── */
+  .config-panel {
+    max-width: 520px;
+    margin: 40px auto;
+    padding: 32px;
+    background: #fff;
+    border-radius: 12px;
+    border: 1px solid #e0e0d8;
+  }
+  .config-panel h2 {
+    font-size: 18px;
+    font-weight: 500;
+    margin-bottom: 20px;
+  }
+
+  .field { margin-bottom: 16px; }
+  .field label {
+    display: block;
+    font-size: 13px;
+    font-weight: 500;
+    margin-bottom: 4px;
+    color: #555;
+  }
+  .field input, .field select {
+    width: 100%;
+    padding: 10px 12px;
+    font-size: 14px;
+    border: 1px solid #d0d0c8;
+    border-radius: 8px;
+    background: #fafaf8;
+    font-family: inherit;
+  }
+  .field input:focus, .field select:focus {
+    outline: none;
+    border-color: #185FA5;
+    box-shadow: 0 0 0 3px rgba(24,95,165,0.1);
+  }
+  .field small {
+    display: block;
+    margin-top: 4px;
+    font-size: 11px;
+    color: #888;
+  }
+
+  .presets {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 16px;
+  }
+  .preset-btn {
+    padding: 6px 14px;
+    font-size: 12px;
+    border: 1px solid #d0d0c8;
+    border-radius: 6px;
+    background: #fff;
+    cursor: pointer;
+    font-family: inherit;
+  }
+  .preset-btn:hover { background: #f0f0ea; }
+  .preset-btn.active { border-color: #185FA5; background: #E6F1FB; color: #042C53; }
+
+  /* ── Session screen ─────────────────────── */
+  .session-setup {
+    max-width: 520px;
+    margin: 40px auto;
+    padding: 32px;
+    background: #fff;
+    border-radius: 12px;
+    border: 1px solid #e0e0d8;
+  }
+
+  /* ── Chat screen ────────────────────────── */
+  .chat-container { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+
+  .chat-header {
+    padding: 10px 20px;
+    background: #fff;
+    border-bottom: 1px solid #e0e0d8;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    flex-wrap: wrap;
+  }
+  .chat-header .topic-badge {
+    font-size: 13px;
+    font-weight: 500;
+    padding: 4px 12px;
+    background: #E6F1FB;
+    color: #042C53;
+    border-radius: 6px;
+  }
+  .chat-header .limits-info {
+    font-size: 12px;
+    color: #666;
+    display: flex;
+    gap: 16px;
+  }
+  .chat-header .limit-item { display: flex; align-items: center; gap: 4px; }
+  .chat-header .limit-value { font-weight: 500; color: #1a1a1a; }
+  .timer-warning { color: #A32D2D !important; }
+
+  .messages {
+    flex: 1;
+    overflow-y: auto;
+    padding: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+
+  .msg {
+    max-width: 80%;
+    padding: 12px 16px;
+    border-radius: 12px;
+    font-size: 14px;
+    line-height: 1.6;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+  .msg.user {
+    align-self: flex-end;
+    background: #1a1a1a;
+    color: #fff;
+    border-bottom-right-radius: 4px;
+  }
+  .msg.assistant {
+    align-self: flex-start;
+    background: #fff;
+    border: 1px solid #e0e0d8;
+    border-bottom-left-radius: 4px;
+  }
+  .msg.system {
+    align-self: center;
+    background: #FAEEDA;
+    color: #633806;
+    font-size: 13px;
+    border-radius: 8px;
+    text-align: center;
+  }
+  .msg.error {
+    align-self: center;
+    background: #FCEBEB;
+    color: #791F1F;
+    font-size: 13px;
+    border-radius: 8px;
+    text-align: center;
+  }
+
+  .chat-input {
+    padding: 12px 20px;
+    background: #fff;
+    border-top: 1px solid #e0e0d8;
+    display: flex;
+    gap: 10px;
+    align-items: flex-end;
+  }
+  .chat-input textarea {
+    flex: 1;
+    padding: 10px 14px;
+    font-size: 14px;
+    font-family: inherit;
+    border: 1px solid #d0d0c8;
+    border-radius: 10px;
+    resize: none;
+    min-height: 44px;
+    max-height: 120px;
+    background: #fafaf8;
+    line-height: 1.5;
+  }
+  .chat-input textarea:focus { outline: none; border-color: #185FA5; }
+
+  /* ── Buttons ────────────────────────────── */
+  .btn {
+    padding: 10px 20px;
+    font-size: 14px;
+    font-weight: 500;
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+    font-family: inherit;
+    transition: opacity 0.15s;
+  }
+  .btn:hover { opacity: 0.85; }
+  .btn:disabled { opacity: 0.4; cursor: default; }
+  .btn-primary { background: #1a1a1a; color: #fff; }
+  .btn-success { background: #0F6E56; color: #fff; }
+  .btn-danger { background: #A32D2D; color: #fff; }
+  .btn-secondary { background: #e0e0d8; color: #1a1a1a; }
+  .btn-sm { padding: 6px 14px; font-size: 13px; }
+
+  .btn-row { display: flex; gap: 10px; margin-top: 20px; }
+
+  /* ── Session end overlay ────────────────── */
+  .end-overlay {
+    display: none;
+    position: absolute;
+    inset: 0;
+    background: rgba(0,0,0,0.4);
+    z-index: 10;
+    align-items: center;
+    justify-content: center;
+  }
+  .end-overlay.visible { display: flex; }
+  .end-panel {
+    background: #fff;
+    padding: 32px;
+    border-radius: 16px;
+    max-width: 400px;
+    width: 90%;
+    text-align: center;
+  }
+  .end-panel h3 { font-size: 18px; margin-bottom: 8px; }
+  .end-panel p { font-size: 14px; color: #666; margin-bottom: 20px; }
+
+  /* ── Stats screen ───────────────────────── */
+  .stats-content {
+    padding: 20px;
+    overflow-y: auto;
+    flex: 1;
+  }
+  .stats-card {
+    background: #fff;
+    border: 1px solid #e0e0d8;
+    border-radius: 12px;
+    padding: 20px;
+    margin-bottom: 16px;
+  }
+  .stats-card h3 {
+    font-size: 15px;
+    font-weight: 500;
+    margin-bottom: 12px;
+    display: flex;
+    justify-content: space-between;
+  }
+  .stats-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    gap: 10px;
+  }
+  .stat-item {
+    padding: 10px;
+    background: #fafaf8;
+    border-radius: 8px;
+    text-align: center;
+  }
+  .stat-item .stat-value { font-size: 18px; font-weight: 500; color: #1a1a1a; }
+  .stat-item .stat-label { font-size: 11px; color: #888; margin-top: 2px; }
+
+  /* ── Log panel ──────────────────────────── */
+  .log-panel {
+    background: #1a1a1a;
+    color: #9FE1CB;
+    font-family: "SF Mono", "Fira Code", monospace;
+    font-size: 11px;
+    padding: 10px 16px;
+    max-height: 140px;
+    overflow-y: auto;
+    border-top: 1px solid #333;
+  }
+  .log-entry { margin-bottom: 2px; white-space: pre-wrap; word-break: break-all; }
+  .log-entry.error { color: #F09595; }
+  .log-entry.warn { color: #FAC775; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>LLM Proxy Client</h1>
+  <span class="status" id="statusBadge">Nicht verbunden</span>
+</header>
+
+<main style="position:relative;">
+
+  <!-- ═══ Screen 1: Configuration ═══════════════════ -->
+  <div class="screen active" id="screenConfig">
+    <div class="config-panel">
+      <h2>Proxy konfigurieren</h2>
+
+      <div class="field">
+        <label>Backend-Typ</label>
+        <div class="presets" id="presets">
+          <button class="preset-btn active" data-type="gcp">GCP Cloud Run</button>
+          <button class="preset-btn" data-type="cloudflare">Cloudflare Workers</button>
+          <button class="preset-btn" data-type="lambda">AWS Lambda</button>
+        </div>
+      </div>
+
+      <div class="field">
+        <label>Proxy URL</label>
+        <input type="text" id="proxyUrl" placeholder="https://llm-proxy-xyz.run.app">
+        <small>Die Base-URL deines deployten Proxy-Service</small>
+      </div>
+
+      <div class="field">
+        <label>Admin Key</label>
+        <input type="password" id="adminKey" placeholder="dein-admin-key">
+        <small>Für Session-Erstellung und Stats-Abruf</small>
+      </div>
+
+      <div class="field">
+        <label>Standard-Modell</label>
+        <select id="defaultModel">
+          <option value="claude-sonnet-4-20250514">Claude Sonnet 4</option>
+          <option value="claude-haiku-4-5-20251001">Claude Haiku 4.5</option>
+          <option value="gpt-4o">GPT-4o</option>
+          <option value="gpt-4o-mini">GPT-4o Mini</option>
+          <option value="gemini-2.0-flash">Gemini 2.0 Flash</option>
+        </select>
+      </div>
+
+      <div class="btn-row">
+        <button class="btn btn-primary" onclick="testConnection()">Verbindung testen</button>
+        <button class="btn btn-secondary" onclick="showScreen('screenSession')">Weiter</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══ Screen 2: Session Setup ═══════════════════ -->
+  <div class="screen" id="screenSession">
+    <div class="session-setup">
+      <h2>Session starten</h2>
+      <p style="font-size:14px;color:#666;margin-bottom:20px;">
+        Gib das Themenfeld ein. Das System berechnet automatisch Zeit- und Budgetlimits basierend auf historischen Daten.
+      </p>
+
+      <div class="field">
+        <label>Themenfeld</label>
+        <input type="text" id="topicInput" placeholder="z.B. kundensupport-zusammenfassung, code-review, datenanalyse">
+      </div>
+
+      <div class="field">
+        <label>Modell</label>
+        <select id="sessionModel">
+          <option value="claude-sonnet-4-20250514">Claude Sonnet 4</option>
+          <option value="claude-haiku-4-5-20251001">Claude Haiku 4.5</option>
+          <option value="gpt-4o">GPT-4o</option>
+          <option value="gpt-4o-mini">GPT-4o Mini</option>
+          <option value="gemini-2.0-flash">Gemini 2.0 Flash</option>
+        </select>
+      </div>
+
+      <div class="btn-row">
+        <button class="btn btn-secondary" onclick="showScreen('screenConfig')">Zurück</button>
+        <button class="btn btn-primary" onclick="startSession()">Session starten</button>
+        <button class="btn btn-secondary" onclick="loadStats()">Stats anzeigen</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══ Screen 3: Chat ════════════════════════════ -->
+  <div class="screen" id="screenChat">
+    <div class="chat-container">
+      <div class="chat-header">
+        <span class="topic-badge" id="chatTopic">—</span>
+        <div class="limits-info">
+          <div class="limit-item">Budget: <span class="limit-value" id="budgetDisplay">—</span></div>
+          <div class="limit-item">Zeit: <span class="limit-value" id="timerDisplay">—</span></div>
+          <div class="limit-item">Requests: <span class="limit-value" id="requestCount">0</span></div>
+          <div class="limit-item">Quelle: <span class="limit-value" id="limitsSource">—</span></div>
+        </div>
+        <button class="btn btn-danger btn-sm" onclick="showEndOverlay()">Session beenden</button>
+      </div>
+
+      <div class="messages" id="messages"></div>
+
+      <div class="chat-input">
+        <textarea id="promptInput" rows="1" placeholder="Nachricht eingeben..." onkeydown="handleKey(event)"></textarea>
+        <button class="btn btn-primary" id="sendBtn" onclick="sendMessage()">Senden</button>
+      </div>
+    </div>
+
+    <!-- End overlay -->
+    <div class="end-overlay" id="endOverlay">
+      <div class="end-panel">
+        <h3>Session beenden</h3>
+        <p>War die Session erfolgreich? Der Messpunkt fließt in die adaptive Limitberechnung ein.</p>
+        <div class="btn-row" style="justify-content:center;">
+          <button class="btn btn-success" onclick="endSession(true)">Erfolgreich</button>
+          <button class="btn btn-danger" onclick="endSession(false)">Fehlgeschlagen</button>
+          <button class="btn btn-secondary" onclick="hideEndOverlay()">Abbrechen</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══ Screen 4: Stats ═══════════════════════════ -->
+  <div class="screen" id="screenStats">
+    <div class="stats-content" id="statsContent">
+      <p style="text-align:center;color:#888;padding:40px;">Lade Stats...</p>
+    </div>
+    <div style="padding:12px 20px;border-top:1px solid #e0e0d8;">
+      <button class="btn btn-secondary" onclick="showScreen('screenSession')">Zurück</button>
+      <button class="btn btn-secondary" onclick="loadStats()" style="margin-left:8px;">Aktualisieren</button>
+    </div>
+  </div>
+
+</main>
+
+<!-- ═══ Log Panel ═══════════════════════════════════ -->
+<div class="log-panel" id="logPanel"></div>
+
+<script>
+// ════════════════════════════════════════════════════
+// State
+// ════════════════════════════════════════════════════
+
+const state = {
+  backendType: "gcp",
+  proxyUrl: "",
+  adminKey: "",
+  model: "claude-sonnet-4-20250514",
+
+  sessionId: null,
+  token: null,
+  topic: null,
+  expiresAt: null,
+  maxBudget: 0,
+  requestCount: 0,
+  timerInterval: null,
+
+  messages: [],
+};
+
+// ════════════════════════════════════════════════════
+// Logging
+// ════════════════════════════════════════════════════
+
+function esc(s) {
+  return String(s)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+const MAX_LOG_ENTRIES = 200;
+const logPanelEl = document.getElementById("logPanel");
+const messagesEl = document.getElementById("messages");
+const sendBtnEl = document.getElementById("sendBtn");
+const promptInputEl = document.getElementById("promptInput");
+const timerDisplayEl = document.getElementById("timerDisplay");
+
+function log(msg, level = "info") {
+  const time = new Date().toISOString().slice(11, 19);
+  const entry = document.createElement("div");
+  entry.className = `log-entry ${level}`;
+  entry.textContent = `[${time}] ${msg}`;
+  logPanelEl.appendChild(entry);
+  if (logPanelEl.childElementCount > MAX_LOG_ENTRIES) {
+    logPanelEl.removeChild(logPanelEl.firstChild);
+  }
+  logPanelEl.scrollTop = logPanelEl.scrollHeight;
+}
+
+// ════════════════════════════════════════════════════
+// Screen management
+// ════════════════════════════════════════════════════
+
+function showScreen(id) {
+  document.querySelectorAll(".screen").forEach((s) => s.classList.remove("active"));
+  document.getElementById(id).classList.add("active");
+}
+
+// ════════════════════════════════════════════════════
+// Config
+// ════════════════════════════════════════════════════
+
+document.querySelectorAll(".preset-btn").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    document.querySelectorAll(".preset-btn").forEach((b) => b.classList.remove("active"));
+    btn.classList.add("active");
+    state.backendType = btn.dataset.type;
+    log(`Backend: ${state.backendType}`);
+  });
+});
+
+function readConfig() {
+  state.proxyUrl = document.getElementById("proxyUrl").value.replace(/\/$/, "");
+  state.adminKey = document.getElementById("adminKey").value;
+  state.model = document.getElementById("defaultModel").value;
+}
+
+async function testConnection() {
+  readConfig();
+  if (!state.proxyUrl) { log("Keine Proxy URL eingegeben", "error"); return; }
+
+  log(`Teste Verbindung zu ${state.proxyUrl}/health ...`);
+  try {
+    const res = await fetch(`${state.proxyUrl}/health`);
+    const data = await res.json();
+    log(`Verbunden: ${JSON.stringify(data)}`);
+    setBadge("Verbunden", "connected");
+  } catch (err) {
+    log(`Verbindungsfehler: ${err.message}`, "error");
+    setBadge("Fehler", "");
+  }
+}
+
+function setBadge(text, cls) {
+  const badge = document.getElementById("statusBadge");
+  badge.textContent = text;
+  badge.className = `status ${cls}`;
+}
+
+// ════════════════════════════════════════════════════
+// Session management
+// ════════════════════════════════════════════════════
+
+async function startSession() {
+  readConfig();
+  const topic = document.getElementById("topicInput").value.trim();
+  const model = document.getElementById("sessionModel").value;
+
+  if (!topic) { log("Kein Themenfeld eingegeben", "error"); return; }
+  if (!state.proxyUrl) { log("Proxy URL fehlt — zurück zur Konfiguration", "error"); return; }
+
+  log(`Starte Session: topic="${topic}", model="${model}"`);
+
+  try {
+    const res = await fetch(`${state.proxyUrl}/v1/session`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ topic, model }),
+    });
+
+    const data = await res.json();
+
+    if (!res.ok) {
+      log(`Session-Fehler: ${JSON.stringify(data)}`, "error");
+      return;
+    }
+
+    state.sessionId = data.session_id;
+    state.token = data.token;
+    state.topic = topic;
+    state.model = model;
+    state.expiresAt = new Date(data.expires_at);
+    state.maxBudget = data.limits.max_budget_usd;
+    state.requestCount = 0;
+    state.messages = [];
+
+    log(`Session gestartet: ${data.session_id}`);
+    log(`Limits: ${data.limits.max_duration_min.toFixed(1)} Min / ${data.limits.max_budget_usd.toFixed(2)} € (${data.limits.source}, ${data.limits.datapoints} Datenpunkte)`);
+
+    document.getElementById("chatTopic").textContent = topic;
+    document.getElementById("budgetDisplay").textContent = `$0.00 / $${state.maxBudget.toFixed(2)}`;
+    document.getElementById("limitsSource").textContent = data.limits.source;
+    document.getElementById("requestCount").textContent = "0";
+    messagesEl.innerHTML = "";
+
+    addMessage("system",`Session gestartet: ${topic}\nModell: ${model}\nLimits: ${data.limits.max_duration_min.toFixed(1)} Min / $${data.limits.max_budget_usd.toFixed(2)} (${data.limits.source})`);
+
+    if (data.stats && data.stats.total_sessions > 0) {
+      addMessage("system",`Historische Stats: ${data.stats.total_sessions} Sessions, Ø $${data.stats.avg_cost_usd.toFixed(2)}, Min $${data.stats.min_cost_usd.toFixed(2)}, Max $${data.stats.max_cost_usd.toFixed(2)}`);
+    }
+
+    setBadge(`Session: ${data.session_id.slice(0, 12)}...`, "session");
+    showScreen("screenChat");
+    startTimer();
+
+    promptInputEl.focus();
+  } catch (err) {
+    log(`Fehler: ${err.message}`, "error");
+  }
+}
+
+function startTimer() {
+  if (state.timerInterval) clearInterval(state.timerInterval);
+  state.timerInterval = setInterval(updateTimer, 1000);
+  updateTimer();
+}
+
+function updateTimer() {
+  if (!state.expiresAt) return;
+  const remaining = state.expiresAt.getTime() - Date.now();
+
+  if (remaining <= 0) {
+    timerDisplayEl.textContent = "ABGELAUFEN";
+    timerDisplayEl.classList.add("timer-warning");
+    clearInterval(state.timerInterval);
+    state.token = null;
+    addMessage("error","Session-Zeit abgelaufen. Der Token wurde serverseitig revoked. Weitere Requests werden abgelehnt.");
+    sendBtnEl.disabled = true;
+    return;
+  }
+
+  const min = Math.floor(remaining / 60000);
+  const sec = Math.floor((remaining % 60000) / 1000);
+  timerDisplayEl.textContent = `${min}:${sec.toString().padStart(2, "0")}`;
+
+  if (remaining < 60000) {
+    timerDisplayEl.classList.add("timer-warning");
+  } else {
+    timerDisplayEl.classList.remove("timer-warning");
+  }
+}
+
+// ════════════════════════════════════════════════════
+// Chat
+// ════════════════════════════════════════════════════
+
+function addMessage(role, text) {
+  const el = document.createElement("div");
+  el.className = `msg ${role}`;
+  el.textContent = text;
+  messagesEl.appendChild(el);
+  messagesEl.scrollTop = messagesEl.scrollHeight;
+}
+
+function handleKey(e) {
+  if (e.key === "Enter" && !e.shiftKey) {
+    e.preventDefault();
+    sendMessage();
+  }
+}
+
+async function sendMessage() {
+  const text = promptInputEl.value.trim();
+  if (!text || !state.token) return;
+
+  promptInputEl.value = "";
+  addMessage("user", text);
+  state.messages.push({ role: "user", content: text });
+
+  sendBtnEl.disabled = true;
+  log(`Request #${state.requestCount + 1}: "${text.slice(0, 50)}..."`);
+
+  try {
+    const res = await fetch(`${state.proxyUrl}/v1/chat`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${state.token}`,
+      },
+      body: JSON.stringify({
+        model: state.model,
+        messages: state.messages,
+        max_tokens: 1024,
+      }),
+    });
+
+    if (res.status === 403 || res.status === 401) {
+      const err = await res.json();
+      log(`Token revoked: ${JSON.stringify(err)}`, "error");
+      addMessage("error",`Session beendet durch Server: ${err.error} — ${err.message || err.reason || ""}`);
+      state.token = null;
+      clearInterval(state.timerInterval);
+      setBadge("Revoked", "");
+      return;
+    }
+
+    if (res.status === 429) {
+      const err = await res.json();
+      log(`Rate limited: ${JSON.stringify(err)}`, "warn");
+      addMessage("error","Rate-Limit erreicht. Warte kurz und versuche es erneut.");
+      sendBtnEl.disabled = false;
+      return;
+    }
+
+    const data = await res.json();
+
+    const usageHeader = res.headers.get("X-Proxy-Usage");
+    if (usageHeader) {
+      try {
+        const usage = JSON.parse(usageHeader);
+        document.getElementById("budgetDisplay").textContent =
+          `$${usage.total_cost_usd.toFixed(4)} / $${state.maxBudget.toFixed(2)}`;
+        log(`Usage: input=${usage.input_tokens}, output=${usage.output_tokens}, cost=$${usage.cost_usd.toFixed(6)}, total=$${usage.total_cost_usd.toFixed(4)}, remaining=$${usage.budget_remaining_usd.toFixed(4)}`);
+      } catch (e) { log(`Usage-Header parse error: ${e.message}`, "warn"); }
+    }
+
+    let responseText = "";
+    if (data.content) {
+      responseText = data.content.map((c) => c.text || "").join("");
+    } else if (data.choices) {
+      responseText = data.choices[0]?.message?.content || "";
+    } else {
+      responseText = JSON.stringify(data, null, 2);
+    }
+
+    state.messages.push({ role: "assistant", content: responseText });
+    state.requestCount++;
+    document.getElementById("requestCount").textContent = state.requestCount;
+
+    addMessage("assistant", responseText);
+    log(`Response: ${responseText.length} Zeichen`);
+  } catch (err) {
+    log(`Fehler: ${err.message}`, "error");
+    addMessage("error",`Netzwerkfehler: ${err.message}`);
+  } finally {
+    sendBtnEl.disabled = !state.token;
+    promptInputEl.focus();
+  }
+}
+
+// ════════════════════════════════════════════════════
+// Session End
+// ════════════════════════════════════════════════════
+
+function showEndOverlay() {
+  document.getElementById("endOverlay").classList.add("visible");
+}
+
+function hideEndOverlay() {
+  document.getElementById("endOverlay").classList.remove("visible");
+}
+
+async function endSession(success) {
+  hideEndOverlay();
+  log(`Session beenden: success=${success}`);
+
+  try {
+    const res = await fetch(`${state.proxyUrl}/v1/session/${state.sessionId}/complete`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ success }),
+    });
+
+    const data = await res.json();
+
+    if (res.ok) {
+      log(`Session beendet: ${JSON.stringify(data.actual)}`);
+      log(`Neue Limits: ${JSON.stringify(data.topic_update.new_limits)}`);
+
+      addMessage("system",
+        `Session beendet (${success ? "Erfolg" : "Fehlschlag"})\n` +
+        `Dauer: ${data.actual.duration_min.toFixed(1)} Min\n` +
+        `Kosten: $${data.actual.cost_usd.toFixed(4)}\n` +
+        `Requests: ${data.actual.total_requests}\n` +
+        `Neue Limits für "${state.topic}": $${data.topic_update.new_limits.max_budget_usd.toFixed(2)} / ${data.topic_update.new_limits.max_duration_min.toFixed(1)} Min (${data.topic_update.new_limits.source})`
+      );
+
+      if (data.topic_update.stats) {
+        const s = data.topic_update.stats;
+        addMessage("system",
+          `Statistik aktualisiert:\n` +
+          `Sessions: ${s.total_sessions} (${s.successful_sessions} erfolgreich)\n` +
+          `Kosten — Min: $${s.min_cost_usd.toFixed(2)} / Ø: $${s.avg_cost_usd.toFixed(2)} / Max: $${s.max_cost_usd.toFixed(2)} / P90: $${s.p90_cost_usd.toFixed(2)}\n` +
+          `Dauer — Min: ${s.min_duration_min.toFixed(1)}m / Ø: ${s.avg_duration_min.toFixed(1)}m / Max: ${s.max_duration_min.toFixed(1)}m`
+        );
+      }
+    } else {
+      log(`Fehler beim Beenden: ${JSON.stringify(data)}`, "error");
+      addMessage("error",`Fehler: ${data.error}`);
+    }
+  } catch (err) {
+    log(`Netzwerkfehler: ${err.message}`, "error");
+  }
+
+  clearInterval(state.timerInterval);
+  state.token = null;
+  sendBtnEl.disabled = true;
+  setBadge("Beendet", "");
+
+  const btn = document.createElement("button");
+  btn.className = "btn btn-primary";
+  btn.style.margin = "10px auto";
+  btn.textContent = "Neue Session starten";
+  btn.onclick = () => {
+    showScreen("screenSession");
+    state.sessionId = null;
+  };
+  messagesEl.appendChild(btn);
+  messagesEl.scrollTop = messagesEl.scrollHeight;
+}
+
+// ════════════════════════════════════════════════════
+// Stats
+// ════════════════════════════════════════════════════
+
+async function loadStats() {
+  readConfig();
+  if (!state.proxyUrl || !state.adminKey) {
+    log("URL und Admin Key benötigt für Stats", "error");
+    return;
+  }
+
+  showScreen("screenStats");
+  log("Lade Topic-Statistiken...");
+
+  try {
+    const res = await fetch(`${state.proxyUrl}/admin/topics`, {
+      headers: { Authorization: `Bearer ${state.adminKey}` },
+    });
+
+    const data = await res.json();
+    const container = document.getElementById("statsContent");
+
+    if (!data.topics || data.topics.length === 0) {
+      container.innerHTML = '<p style="text-align:center;color:#888;padding:40px;">Keine Topic-Daten vorhanden. Starte erst ein paar Sessions.</p>';
+      return;
+    }
+
+    container.innerHTML = data.topics.map((t) => `
+      <div class="stats-card">
+        <h3>
+          <span>${esc(t.topic)} / ${esc(t.model.split("-").slice(0, 2).join("-"))}</span>
+          <span style="font-size:12px;color:#888;font-weight:400;">${esc(String(t.datapoints))} Sessions</span>
+        </h3>
+        <div class="stats-grid">
+          <div class="stat-item">
+            <div class="stat-value">$${t.stats.min_cost_usd.toFixed(2)}</div>
+            <div class="stat-label">Min Kosten</div>
+          </div>
+          <div class="stat-item">
+            <div class="stat-value">$${t.stats.avg_cost_usd.toFixed(2)}</div>
+            <div class="stat-label">Ø Kosten</div>
+          </div>
+          <div class="stat-item">
+            <div class="stat-value">$${t.stats.median_cost_usd.toFixed(2)}</div>
+            <div class="stat-label">Median</div>
+          </div>
+          <div class="stat-item">
+            <div class="stat-value">$${t.stats.max_cost_usd.toFixed(2)}</div>
+            <div class="stat-label">Max Kosten</div>
+          </div>
+          <div class="stat-item">
+            <div class="stat-value">$${t.stats.p90_cost_usd.toFixed(2)}</div>
+            <div class="stat-label">P90 Kosten</div>
+          </div>
+          <div class="stat-item">
+            <div class="stat-value">$${t.stats.total_cost_usd.toFixed(2)}</div>
+            <div class="stat-label">Gesamt</div>
+          </div>
+          <div class="stat-item">
+            <div class="stat-value">${t.stats.avg_duration_min.toFixed(1)}m</div>
+            <div class="stat-label">Ø Dauer</div>
+          </div>
+          <div class="stat-item">
+            <div class="stat-value">${t.stats.successful_sessions}/${t.stats.total_sessions}</div>
+            <div class="stat-label">Erfolgsrate</div>
+          </div>
+        </div>
+        <div style="margin-top:12px;font-size:12px;color:#888;">
+          Aktuelle Limits: $${t.current_limits.max_budget_usd.toFixed(2)} / ${t.current_limits.max_duration_min.toFixed(1)} Min
+          <span style="padding:2px 8px;background:#E6F1FB;color:#042C53;border-radius:4px;margin-left:4px;">${esc(t.current_limits.source)}</span>
+        </div>
+      </div>
+    `).join("");
+
+    log(`${data.topics.length} Topic-Profile geladen`);
+  } catch (err) {
+    log(`Stats-Fehler: ${err.message}`, "error");
+    const errP = document.createElement("p");
+    errP.style.cssText = "text-align:center;color:#A32D2D;padding:40px;";
+    errP.textContent = `Fehler: ${err.message}`;
+    const sc = document.getElementById("statsContent");
+    sc.innerHTML = "";
+    sc.appendChild(errP);
+  }
+}
+
+// ════════════════════════════════════════════════════
+// Init
+// ════════════════════════════════════════════════════
+
+log("LLM Proxy Client gestartet. Backend wählen und Proxy URL eingeben.");
+</script>
+
+</body>
+</html>

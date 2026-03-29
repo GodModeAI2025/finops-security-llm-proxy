@@ -1,0 +1,92 @@
+---
+title: "LLM Proxy — AWS Lambda"
+---
+flowchart TB
+    subgraph Clients["Clients"]
+        DEV["Entwickler"]
+        BOT["Agenten / Bots"]
+        PARTNER["Externe Partner"]
+        ELECTRON["Electron PoC App"]
+    end
+
+    subgraph AWSCompute["AWS Compute"]
+        APIGW["API Gateway v2\n(HTTP API)\nHTTPS + Routing"]
+
+        subgraph Lambda["Lambda Function"]
+            direction TB
+            subgraph SessionLogic["Session-Management"]
+                S1["POST /v1/session\nSession eröffnen"]
+                S2["POST /v1/session/:id/complete\nSession beenden"]
+            end
+
+            subgraph ProxyLogic["Proxy-Logik"]
+                P1["POST /v1/chat"]
+                P2["Token laden\n(DynamoDB Get)"]
+                P3["TTL + Budget + Scope\nprüfen"]
+                P4["Rate-Limit\n(in-memory)"]
+                P5["Request forwarden\n(kein Streaming)"]
+                P6["Response evaluieren\n+ Usage tracken"]
+            end
+
+            subgraph AdminLogic["Admin-Logik"]
+                A1["CRUD /admin/tokens"]
+                A2["POST /admin/revoke/:id"]
+                A3["GET /admin/usage/:id"]
+                A4["GET /admin/topics\nStats: Min/Max/Ø/P90"]
+            end
+
+            subgraph TopicProfiler["Topic Profiler"]
+                TP1["Profil laden / erstellen"]
+                TP2["calculateLimits()\nP90 + 10% Marge"]
+                TP3["computeStats()"]
+                TP4["recordAndRecalculate()"]
+            end
+        end
+    end
+
+    subgraph AWSStorage["AWS Services"]
+        DDB[("DynamoDB\nSingle-Table Design\nTOKEN#id → META\nTOKEN#id → USAGE\nTOPIC#t:m → PROFILE\nSESSION#id → META\nGSI: Status + Owner")]
+        ASM["Secrets Manager\nllm-proxy/anthropic-key\nllm-proxy/openai-key\nllm-proxy/admin-key"]
+        EB["EventBridge\nCron alle 5 Min"]
+    end
+
+    subgraph LLMProviders["LLM Provider"]
+        ANTH["Anthropic API"]
+        OAI["OpenAI API"]
+        GOOG["Google AI API"]
+    end
+
+    Clients -->|"HTTPS"| APIGW
+    APIGW -->|"Event"| Lambda
+
+    S1 --> TP1
+    TP1 -->|"DynamoDB Get\nTOPIC# Key"| DDB
+    TP1 --> TP2
+    TP2 -->|"Token + Session\nschreiben"| DDB
+
+    S2 -->|"Usage laden\nTOKEN#id USAGE"| DDB
+    S2 --> TP4
+    TP4 --> TP3
+    TP3 -->|"Profil updaten"| DDB
+
+    P1 --> P2
+    P2 -->|"DynamoDB Get\n5-10ms"| DDB
+    P2 --> P3
+    P3 --> P4
+    P4 --> P5
+    P5 -->|"API-Key laden"| ASM
+    P5 -->|"Bearer sk-..."| LLMProviders
+    LLMProviders -->|"Response + usage"| P6
+    P6 -->|"UpdateExpression\nAtomic Increment"| DDB
+
+    EB -->|"Scheduled Event"| Lambda
+    A4 -->|"Scan TOPIC#"| DDB
+
+    style AWSCompute fill:#FBEAF0,stroke:#993556,stroke-width:2px
+    style Lambda fill:#FBEAF0,stroke:#72243E,stroke-width:1px
+    style AWSStorage fill:#FAEEDA,stroke:#854F0B,stroke-width:1px
+    style LLMProviders fill:#F1EFE8,stroke:#888780,stroke-width:1px
+    style Clients fill:#FAFAF8,stroke:#D3D1C7,stroke-width:1px
+    style TopicProfiler fill:#E1F5EE,stroke:#0F6E56,stroke-width:1px
+    style SessionLogic fill:#EEEDFE,stroke:#534AB7,stroke-width:1px
+    style APIGW fill:#FBEAF0,stroke:#D4537E

@@ -1,0 +1,116 @@
+---
+title: "LLM Proxy — Gesamtsystem"
+---
+flowchart TB
+    subgraph ElectronApp["Electron PoC Client"]
+        direction TB
+        CFG["1. Konfiguration\nBackend wählen\nURL + Admin Key"]
+        SESS["2. Session starten\nThema + Modell eingeben"]
+        CHAT["3. Chat\nPrompts senden\nTimer + Budget live"]
+        DONE["4. Session beenden\nErfolg / Misserfolg"]
+        STATS["5. Stats ansehen\nMin/Max/Ø/Median/P90"]
+
+        CFG --> SESS
+        SESS --> CHAT
+        CHAT --> DONE
+        DONE -.->|"Neue Session"| SESS
+        SESS -.-> STATS
+    end
+
+    subgraph ProxyLayer["LLM Proxy (wahlweise)"]
+        direction TB
+
+        subgraph GCP["GCP Cloud Run"]
+            GCR["Express.js Service"]
+            GFS[("Firestore")]
+            GSM["Secret Manager"]
+            GCS["Cloud Scheduler"]
+            GCR <--> GFS
+            GCR --> GSM
+            GCS -->|"Cleanup"| GCR
+        end
+
+        subgraph CF["Cloudflare Workers"]
+            CFW["Worker"]
+            CKV[("KV + Durable Objects")]
+            CFS["Wrangler Secrets"]
+            CCR["Cron Trigger"]
+            CFW <--> CKV
+            CFW --> CFS
+            CCR -->|"Cleanup"| CFW
+        end
+
+        subgraph AWS["AWS Lambda"]
+            LFN["Lambda Function"]
+            DDB[("DynamoDB")]
+            ASM["Secrets Manager"]
+            AEB["EventBridge"]
+            AGW["API Gateway"]
+            AGW --> LFN
+            LFN <--> DDB
+            LFN --> ASM
+            AEB -->|"Cleanup"| LFN
+        end
+    end
+
+    subgraph SharedAPI["Einheitliche API-Oberfläche"]
+        direction LR
+        EP1["POST /v1/session\nSession eröffnen"]
+        EP2["POST /v1/chat\nLLM Request proxyen"]
+        EP3["POST /v1/session/:id/complete\nSession beenden"]
+        EP4["GET /admin/topics\nStatistiken"]
+        EP5["GET /health\nVerbindungstest"]
+    end
+
+    subgraph LLMs["LLM Provider"]
+        ANTH["Anthropic\nClaude Sonnet/Opus/Haiku"]
+        OAI["OpenAI\nGPT-4o / o3"]
+        GOOG["Google\nGemini Flash/Pro"]
+    end
+
+    subgraph AdaptiveEngine["Adaptiver Algorithmus"]
+        direction TB
+        AE1["Stufe 1: Unbekannt\n→ 50 Min / 50 €"]
+        AE2["Stufe 2: 1-4 Sessions\n→ max(Werte) × 1.10"]
+        AE3["Stufe 3: ≥ 5 Sessions\n→ P90 × 1.10\nnie > 50"]
+        AE1 -.-> AE2
+        AE2 -.-> AE3
+    end
+
+    subgraph Enforcement["Server-seitige Durchsetzung"]
+        direction TB
+        ENF1["Jeder Request:\nTTL prüfen vor Forward"]
+        ENF2["Jeder Request:\nBudget prüfen vor Forward"]
+        ENF3["Cron alle 5 Min:\nAbgelaufene Tokens revoken"]
+        ENF4["Bei Überschreitung:\nstatus → revoked\n403 an Client"]
+    end
+
+    %% Electron connects to shared API
+    ElectronApp ==>|"Konfigurierbare\nProxy-URL"| SharedAPI
+
+    %% Shared API is implemented by all three
+    SharedAPI --- GCP
+    SharedAPI --- CF
+    SharedAPI --- AWS
+
+    %% All backends forward to LLMs
+    GCP -->|"Bearer sk-ant/sk-proj"| LLMs
+    CF -->|"Bearer sk-ant/sk-proj"| LLMs
+    AWS -->|"Bearer sk-ant/sk-proj"| LLMs
+
+    %% Adaptive engine feeds into session creation
+    EP1 -.->|"Limits berechnen"| AdaptiveEngine
+    EP3 -.->|"Messpunkt\nzurückspeisen"| AdaptiveEngine
+
+    %% Enforcement runs on every request
+    EP2 -.-> Enforcement
+
+    style ElectronApp fill:#E6F1FB,stroke:#185FA5,stroke-width:2px
+    style ProxyLayer fill:#FAFAF8,stroke:#D3D1C7,stroke-width:1px
+    style GCP fill:#EAF3DE,stroke:#3B6D11,stroke-width:1px
+    style CF fill:#FAEEDA,stroke:#854F0B,stroke-width:1px
+    style AWS fill:#FBEAF0,stroke:#993556,stroke-width:1px
+    style SharedAPI fill:#EEEDFE,stroke:#534AB7,stroke-width:2px
+    style LLMs fill:#F1EFE8,stroke:#888780,stroke-width:1px
+    style AdaptiveEngine fill:#E1F5EE,stroke:#0F6E56,stroke-width:2px
+    style Enforcement fill:#FCEBEB,stroke:#A32D2D,stroke-width:2px

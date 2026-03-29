@@ -1,0 +1,91 @@
+---
+title: "LLM Proxy — Cloudflare Workers"
+---
+flowchart TB
+    subgraph Clients["Clients"]
+        DEV["Entwickler"]
+        BOT["Agenten / Bots"]
+        PARTNER["Externe Partner"]
+        ELECTRON["Electron PoC App"]
+    end
+
+    subgraph CFWorker["Cloudflare Worker"]
+        direction TB
+        subgraph SessionHandler["Session-Management"]
+            S1["POST /v1/session\nSession eröffnen"]
+            S2["POST /v1/session/:id/complete\nSession beenden"]
+        end
+
+        subgraph ProxyHandler["Proxy Handler"]
+            P1["POST /v1/chat"]
+            P2["Token aus KV laden"]
+            P3["TTL + Budget + Scope\nprüfen"]
+            P4["Rate-Limit\n(in-memory)"]
+            P5["Request forwarden\n(Streaming via TransformStream)"]
+            P6["Response evaluieren"]
+        end
+
+        subgraph AdminHandler["Admin Handler"]
+            A1["CRUD /admin/tokens"]
+            A2["POST /admin/revoke/:id"]
+            A3["GET /admin/usage/:id"]
+            A4["GET /admin/topics\nStats: Min/Max/Ø/P90"]
+            A5["Cron Trigger\nTTL Cleanup"]
+        end
+
+        subgraph TopicProfiler["Topic Profiler"]
+            TP1["Profil aus KV laden"]
+            TP2["calculateLimits()\nP90 + 10% Marge\nmax 50"]
+            TP3["computeStats()\nMin/Max/Ø/Median/P90"]
+            TP4["Profil zurückschreiben"]
+        end
+    end
+
+    subgraph CFStorage["Cloudflare Storage"]
+        KV[("KV Namespace\nptk_... → Token JSON\ntopic:... → Profil JSON\nsession:... → Meta JSON")]
+        DO["Durable Object\nUsageCounter\n(1 pro Token)\nAtomares total_cost++\nfail_streak Tracking"]
+        SEC["Wrangler Secrets\nANTHROPIC_API_KEY\nOPENAI_API_KEY\nADMIN_KEY"]
+    end
+
+    subgraph LLMProviders["LLM Provider"]
+        ANTH["Anthropic API"]
+        OAI["OpenAI API"]
+        GOOG["Google AI API"]
+    end
+
+    Clients -->|"Bearer ptk_..."| P1
+    Clients -->|"topic + model"| S1
+
+    S1 --> TP1
+    TP1 -->|"KV Read"| KV
+    TP1 --> TP2
+    TP2 -->|"Token + Session\nin KV schreiben"| KV
+
+    S2 -->|"Usage aus DO lesen"| DO
+    S2 --> TP3
+    TP3 --> TP4
+    TP4 -->|"Profil updaten"| KV
+
+    P1 --> P2
+    P2 -->|"KV Read < 10ms"| KV
+    P2 --> P3
+    P3 -->|"Budget-Check"| DO
+    P3 --> P4
+    P4 --> P5
+    P5 -->|"Echter API-Key"| SEC
+    P5 -->|"Bearer sk-..."| LLMProviders
+    LLMProviders -->|"Response + usage"| P6
+    P6 -->|"POST /track\nAtomares Update"| DO
+    P6 -->|"Auto-Revoke?\nKV Update"| KV
+
+    A5 -->|"Abgelaufene Tokens\nin KV revoken"| KV
+    A3 -->|"Usage lesen"| DO
+    A4 -->|"Profile lesen"| KV
+
+    style CFWorker fill:#FAEEDA,stroke:#854F0B,stroke-width:2px
+    style CFStorage fill:#F1EFE8,stroke:#5F5E5A,stroke-width:1px
+    style LLMProviders fill:#F1EFE8,stroke:#888780,stroke-width:1px
+    style Clients fill:#FAFAF8,stroke:#D3D1C7,stroke-width:1px
+    style TopicProfiler fill:#E1F5EE,stroke:#0F6E56,stroke-width:1px
+    style SessionHandler fill:#EEEDFE,stroke:#534AB7,stroke-width:1px
+    style DO fill:#E1F5EE,stroke:#0F6E56
