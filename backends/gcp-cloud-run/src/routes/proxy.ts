@@ -9,6 +9,7 @@ import {
 import { getProviderKey } from "../utils/secrets";
 import { checkRateLimit } from "../middleware/rate-limiter";
 import { proxyAuth } from "../middleware/auth";
+import { enforceMaxTokens, checkAgentLoop } from "../services/request-guards";
 
 const router = Router();
 
@@ -87,7 +88,26 @@ router.post("/v1/chat", proxyAuth, async (req: Request, res: Response) => {
     });
   }
 
-  // ── 6. Get real API key ──────────────────────────────────
+  // ── 6. Output-Limit (max_tokens_per_request) ──────────────
+  const maxTokens = enforceMaxTokens(providerName, body, token.rules.max_tokens_per_request);
+  if (!maxTokens.ok) {
+    return res.status(400).json({
+      error: "max_tokens_exceeded",
+      message: `Requested ${maxTokens.requested} output tokens, token allows at most ${maxTokens.limit}.`,
+    });
+  }
+
+  // ── 7. Agent-Loop-Breaker ────────────────────────────────
+  const loop = checkAgentLoop(token.id, body);
+  if (loop.blocked) {
+    return res.status(429).json({
+      error: "agent_loop_detected",
+      message: `Identical request repeated ${loop.repeats} times within a short window. Change the request or wait.`,
+      retry_after_seconds: loop.retry_after_seconds,
+    });
+  }
+
+  // ── 8. Get real API key ──────────────────────────────────
   let realApiKey: string;
   try {
     realApiKey = await getProviderKey(providerName);
@@ -99,12 +119,12 @@ router.post("/v1/chat", proxyAuth, async (req: Request, res: Response) => {
     });
   }
 
-  // ── 7. Forward request ───────────────────────────────────
+  // ── 9. Forward request ───────────────────────────────────
   const isStream = body.stream === true;
   const targetUrl = `${providerConfig.base_url}${providerConfig.chat_path}`;
 
   // For streaming with OpenAI, inject stream_options to get usage data
-  const forwardBody = { ...body };
+  const forwardBody = { ...maxTokens.body };
   if (isStream && providerName === "openai") {
     forwardBody.stream_options = { include_usage: true };
   }

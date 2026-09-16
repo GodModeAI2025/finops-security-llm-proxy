@@ -113,6 +113,7 @@ Cronjob alle 5 Minuten: `POST /admin/cleanup` an den Cloud Run Service. Revoked 
 2. **Token validieren** — Firestore Read: existiert der Token, ist `status == "active"`?
 3. **Regeln prüfen** — TTL abgelaufen? Budget überschritten? Rate-Limit erreicht? → 403/429
 4. **Provider auflösen** — Ist der angefragte Provider/Modell erlaubt? Echten API-Key aus Secret Manager laden.
+   Vorher greifen die Request-Guards: Output-Limit über `max_tokens_per_request` (400) und Agent-Loop-Breaker (429).
 5. **Request weiterleiten** — Header umschreiben (`Bearer ptk_...` → `Bearer sk-ant-...`), Body 1:1 durchreichen. Streaming wird transparent durchgereicht.
 6. **Response evaluieren** — HTTP 200 → `fail_streak = 0`. HTTP 4xx/5xx oder leere Antwort → `fail_streak++`.
 7. **Usage tracken** — Firestore Transaction: `total_requests++`, `total_cost_usd += berechnete_kosten`. Prüfen ob Auto-Revoke-Regeln greifen.
@@ -140,6 +141,10 @@ Nach jedem Request prüft der Proxy:
 | TTL | `now() >= ttl_expires_at` | Revoke mit Grund `ttl_expired` |
 | Fehlerquote | `fail_streak >= max_fail_streak` | Revoke mit Grund `fail_streak_exceeded` |
 | Rate-Limit | Requests/Min > `max_requests_per_min` | Request ablehnen (429), kein Revoke |
+| Output-Limit | Angefragte Output-Tokens > `max_tokens_per_request` | Request ablehnen (400 `max_tokens_exceeded`), kein Revoke. Fehlt die Angabe im Request, setzt der Proxy das Limit (`max_tokens` / `max_completion_tokens` / `generationConfig.maxOutputTokens`) |
+| Agent-Loop | Mehr als 3 identische Request-Bodies (ohne `stream`-Felder) pro Token innerhalb von 120 s | Request ablehnen (429 `agent_loop_detected`, mit `retry_after_seconds`), kein Revoke, nicht an den Provider weitergeleitet |
+
+Der Loop-Breaker adressiert hängende Agenten, die denselben Prompt endlos wiederholen (OWASP LLM "Unbounded Consumption"). Der Zustand liegt wie beim Rate-Limiter im Speicher der Instanz bzw. des Isolates; Fenster und Schwelle sind in `request-guards.ts` konfiguriert.
 
 ## Session-Auswertung (Post-Mortem)
 
@@ -166,6 +171,7 @@ Neuen Provider hinzufügen:
 - Echte API-Keys werden nie geloggt, nie in Responses exponiert, nie in Firestore gespeichert
 - HTTPS erzwungen (Cloud Run default)
 - Rate-Limiting pro Token eingebaut
+- Output-Limit pro Request und Agent-Loop-Breaker gegen unkontrollierten Verbrauch
 
 ## Infrastrukturkosten (geschätzt)
 

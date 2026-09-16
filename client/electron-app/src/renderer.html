@@ -702,7 +702,11 @@ async function sendMessage() {
     if (res.status === 429) {
       const err = await res.json();
       log(`Rate limited: ${JSON.stringify(err)}`, "warn");
-      addMessage("error","Rate-Limit erreicht. Warte kurz und versuche es erneut.");
+      if (err.error === "agent_loop_detected") {
+        addMessage("error",`Identischer Request zu oft wiederholt (Agent-Loop). Anfrage ändern oder ${err.retry_after_seconds}s warten.`);
+      } else {
+        addMessage("error","Rate-Limit erreicht. Warte kurz und versuche es erneut.");
+      }
       sendBtnEl.disabled = false;
       return;
     }
