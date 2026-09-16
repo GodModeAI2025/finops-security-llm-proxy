@@ -1,6 +1,6 @@
 import { Env, TokenData, UsageData, revokeToken, getUsageStub } from "../types";
 import { PROVIDERS, resolveProvider, getProviderKey, calculateCost } from "../providers";
-import { enforceMaxTokens, checkAgentLoop } from "../request-guards";
+import { enforceMaxTokens, checkAgentLoop, loopConfigFromEnv } from "../request-guards";
 
 // ============================================================
 // Simple in-memory rate limiter (per-isolate)
@@ -111,7 +111,7 @@ export async function handleProxy(request: Request, env: Env, ctx: ExecutionCont
   }
 
   // ── 10. Agent-Loop-Breaker (per-isolate) ────────────────
-  const loop = checkAgentLoop(tokenId, body);
+  const loop = checkAgentLoop(tokenId, body, loopConfigFromEnv(env as unknown as Record<string, unknown>));
   if (loop.blocked) {
     return Response.json(
       { error: "agent_loop_detected", repeats: loop.repeats, retry_after_seconds: loop.retry_after_seconds },

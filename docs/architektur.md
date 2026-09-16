@@ -142,9 +142,13 @@ Nach jedem Request prüft der Proxy:
 | Fehlerquote | `fail_streak >= max_fail_streak` | Revoke mit Grund `fail_streak_exceeded` |
 | Rate-Limit | Requests/Min > `max_requests_per_min` | Request ablehnen (429), kein Revoke |
 | Output-Limit | Angefragte Output-Tokens > `max_tokens_per_request` | Request ablehnen (400 `max_tokens_exceeded`), kein Revoke. Fehlt die Angabe im Request, setzt der Proxy das Limit (`max_tokens` / `max_completion_tokens` / `generationConfig.maxOutputTokens`) |
-| Agent-Loop | Mehr als 3 identische Request-Bodies (ohne `stream`-Felder) pro Token innerhalb von 120 s | Request ablehnen (429 `agent_loop_detected`, mit `retry_after_seconds`), kein Revoke, nicht an den Provider weitergeleitet |
+| Agent-Loop | Mehr als 5 identische Request-Bodies (ohne `stream`-Felder) pro Token innerhalb von 120 s (konfigurierbar) | Request ablehnen (429 `agent_loop_detected`, mit `retry_after_seconds`), kein Revoke, nicht an den Provider weitergeleitet |
 
-Der Loop-Breaker adressiert hängende Agenten, die denselben Prompt endlos wiederholen (OWASP LLM "Unbounded Consumption"). Der Zustand liegt wie beim Rate-Limiter im Speicher der Instanz bzw. des Isolates; Fenster und Schwelle sind in `request-guards.ts` konfiguriert.
+Der Loop-Breaker adressiert hängende Agenten, die denselben Prompt endlos wiederholen (OWASP LLM "Unbounded Consumption").
+
+- **Konfiguration:** `AGENT_LOOP_MAX_IDENTICAL` (Default `5`, `0` = aus) und `AGENT_LOOP_WINDOW_SECONDS` (Default `120`) als Umgebungsvariable (Cloud Run, Lambda) bzw. `[vars]` in `wrangler.toml` (Workers).
+- **Legitime Wiederholungen:** Auch korrekte Clients senden denselben Body mehrfach, z. B. SDK-Retries nach Netzwerkfehlern oder Best-of-N-Sampling mit Temperatur > 0 (Anthropic kennt kein `n`, also N identische Requests). Jeder Versuch zählt, auch wenn der Provider-Call scheiterte. Wer mehr als 5 identische Requests in 120 s braucht, erhöht die Schwelle oder schaltet den Breaker ab.
+- **Zustand ist best effort:** Die Zähler liegen wie beim Rate-Limiter im Speicher der Instanz bzw. des Isolates. Bei mehreren Cloud-Run-/Lambda-Instanzen oder Workers-Isolates zählt jede für sich, nach Kaltstart beginnt der Zähler bei null. Ein Loop kann deshalb später oder gar nicht erkannt werden; die harte Kostengrenze bleibt das Budget pro Token.
 
 ## Session-Auswertung (Post-Mortem)
 
@@ -172,6 +176,7 @@ Neuen Provider hinzufügen:
 - HTTPS erzwungen (Cloud Run default)
 - Rate-Limiting pro Token eingebaut
 - Output-Limit pro Request und Agent-Loop-Breaker gegen unkontrollierten Verbrauch
+- Admin-Key-Vergleich zeitkonstant (SHA-256 + `timingSafeEqual`), leerer Admin-Key wird nie akzeptiert
 
 ## Infrastrukturkosten (geschätzt)
 

@@ -10,6 +10,9 @@ export interface Env {
   GOOGLE_API_KEY?: string;
   ADMIN_KEY: string;
   ENVIRONMENT: string;
+  /** Agent-Loop-Breaker: erlaubte identische Requests im Fenster (0 = aus), siehe request-guards.ts */
+  AGENT_LOOP_MAX_IDENTICAL?: string;
+  AGENT_LOOP_WINDOW_SECONDS?: string;
 }
 
 // ============================================================
@@ -32,6 +35,21 @@ export async function getUsage(env: Env, tokenId: string): Promise<UsageData> {
   const stub = getUsageStub(env, tokenId);
   const res = await stub.fetch(new Request("http://do/usage"));
   return res.json();
+}
+
+/**
+ * Zeitkonstanter Admin-Key-Check. SHA-256 vorab gleicht die Längen an
+ * (crypto.subtle.timingSafeEqual verlangt gleich lange Buffer). Leerer Key wird nie akzeptiert.
+ */
+export async function isAdminAuthorized(request: Request, env: Env): Promise<boolean> {
+  const auth = request.headers.get("Authorization");
+  if (!auth?.startsWith("Bearer ") || !env.ADMIN_KEY) return false;
+  const enc = new TextEncoder();
+  const [a, b] = await Promise.all([
+    crypto.subtle.digest("SHA-256", enc.encode(auth.slice(7))),
+    crypto.subtle.digest("SHA-256", enc.encode(env.ADMIN_KEY)),
+  ]);
+  return crypto.subtle.timingSafeEqual(a, b);
 }
 
 export function generateTokenId(): string {

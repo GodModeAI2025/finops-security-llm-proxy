@@ -7,7 +7,9 @@
  *    wieder (typisch für hängende Agenten), wird er mit 429 geblockt, bevor Kosten entstehen.
  *
  * Laufzeit-neutral (kein Node-/Workers-spezifisches API) und in allen drei Backends identisch.
- * Der Loop-Zustand liegt im Speicher der Instanz — wie der Rate-Limiter.
+ * Der Loop-Zustand liegt im Speicher der Instanz — wie der Rate-Limiter. Er ist daher
+ * best effort: Cloud Run/Lambda mit mehreren Instanzen bzw. Workers-Isolates zählen getrennt,
+ * nach Kaltstart ist der Zähler leer. Schutz vor Kosten bietet weiterhin das Budget.
  */
 
 // ============================================================
@@ -59,10 +61,40 @@ export function enforceMaxTokens(providerName: string, body: any, limit: number 
 // Agent-Loop-Breaker
 // ============================================================
 
-/** Zeitfenster, in dem identische Requests gezählt werden. */
+/** Default-Zeitfenster, in dem identische Requests gezählt werden. */
 export const LOOP_WINDOW_MS = 120_000;
-/** So viele identische Requests sind im Fenster erlaubt; der nächste wird geblockt. */
-export const LOOP_MAX_IDENTICAL = 3;
+/**
+ * Default: so viele identische Requests sind im Fenster erlaubt; der nächste wird geblockt.
+ * Bewusst nicht zu knapp: SDK-Retries nach Netzwerkfehlern (meist 2–3 Wiederholungen) und
+ * Best-of-N-Sampling mit Temperatur > 0 schicken legitim denselben Body mehrfach.
+ */
+export const LOOP_MAX_IDENTICAL = 5;
+
+export interface LoopConfig {
+  /** 0 = Loop-Breaker aus. */
+  maxIdentical: number;
+  windowMs: number;
+}
+
+export const DEFAULT_LOOP_CONFIG: LoopConfig = { maxIdentical: LOOP_MAX_IDENTICAL, windowMs: LOOP_WINDOW_MS };
+
+/**
+ * Konfiguration aus Umgebungsvariablen (process.env bzw. Workers-env):
+ * AGENT_LOOP_MAX_IDENTICAL (0 = aus), AGENT_LOOP_WINDOW_SECONDS. Ungültige Werte → Default.
+ */
+export function loopConfigFromEnv(env: Record<string, unknown> | undefined): LoopConfig {
+  const read = (name: string): number | undefined => {
+    const raw = env?.[name];
+    if (raw === undefined || raw === null || raw === "") return undefined;
+    const value = Number(raw);
+    return Number.isInteger(value) && value >= 0 ? value : undefined;
+  };
+  const windowSeconds = read("AGENT_LOOP_WINDOW_SECONDS");
+  return {
+    maxIdentical: read("AGENT_LOOP_MAX_IDENTICAL") ?? LOOP_MAX_IDENTICAL,
+    windowMs: windowSeconds ? windowSeconds * 1000 : LOOP_WINDOW_MS,
+  };
+}
 
 const loopHistory = new Map<string, number[]>();
 
@@ -89,13 +121,21 @@ export function fingerprintRequest(body: any): string {
 export type LoopCheck = { blocked: false } | { blocked: true; repeats: number; retry_after_seconds: number };
 
 /** Zählt den Request und meldet, ob er als Agent-Loop geblockt werden soll. */
-export function checkAgentLoop(tokenId: string, body: any, now = Date.now()): LoopCheck {
-  const key = `${tokenId}:${fingerprintRequest(body)}`;
-  const seen = (loopHistory.get(key) ?? []).filter((t) => t > now - LOOP_WINDOW_MS);
+export function checkAgentLoop(
+  tokenId: string,
+  body: any,
+  config: LoopConfig = DEFAULT_LOOP_CONFIG,
+  now = Date.now()
+): LoopCheck {
+  const { maxIdentical, windowMs } = config;
+  if (maxIdentical <= 0) return { blocked: false };
 
-  if (seen.length >= LOOP_MAX_IDENTICAL) {
+  const key = `${tokenId}:${fingerprintRequest(body)}`;
+  const seen = (loopHistory.get(key) ?? []).filter((t) => t > now - windowMs);
+
+  if (seen.length >= maxIdentical) {
     loopHistory.set(key, seen);
-    const retryAfterMs = seen[0] + LOOP_WINDOW_MS - now;
+    const retryAfterMs = seen[0] + windowMs - now;
     return { blocked: true, repeats: seen.length, retry_after_seconds: Math.max(1, Math.ceil(retryAfterMs / 1000)) };
   }
 
@@ -105,7 +145,7 @@ export function checkAgentLoop(tokenId: string, body: any, now = Date.now()): Lo
   // Speicher begrenzen: gelegentlich abgelaufene Einträge entfernen
   if (loopHistory.size > 10_000) {
     for (const [k, times] of loopHistory) {
-      if (times.every((t) => t <= now - LOOP_WINDOW_MS)) loopHistory.delete(k);
+      if (times.every((t) => t <= now - windowMs)) loopHistory.delete(k);
     }
   }
   return { blocked: false };

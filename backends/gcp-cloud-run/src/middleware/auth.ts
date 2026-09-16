@@ -1,6 +1,6 @@
 import { Request, Response, NextFunction } from "express";
 import { getToken, revokeToken } from "../utils/firestore";
-import { getAdminKey } from "../utils/secrets";
+import { getAdminKey, secretMatches } from "../utils/secrets";
 import { TokenDocument } from "../types";
 
 // Extend Express Request to carry token info
@@ -82,7 +82,7 @@ export async function adminAuth(req: Request, res: Response, next: NextFunction)
 
   try {
     const adminKey = await getAdminKey();
-    if (providedKey !== adminKey) {
+    if (!secretMatches(providedKey, adminKey)) {
       return res.status(403).json({
         error: "forbidden",
         message: "Invalid admin key.",

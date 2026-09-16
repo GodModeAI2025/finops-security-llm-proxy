@@ -9,7 +9,7 @@ import {
 import { getProviderKey } from "../utils/secrets";
 import { checkRateLimit } from "../middleware/rate-limiter";
 import { proxyAuth } from "../middleware/auth";
-import { enforceMaxTokens, checkAgentLoop } from "../services/request-guards";
+import { enforceMaxTokens, checkAgentLoop, loopConfigFromEnv } from "../services/request-guards";
 
 const router = Router();
 
@@ -98,7 +98,7 @@ router.post("/v1/chat", proxyAuth, async (req: Request, res: Response) => {
   }
 
   // ── 7. Agent-Loop-Breaker ────────────────────────────────
-  const loop = checkAgentLoop(token.id, body);
+  const loop = checkAgentLoop(token.id, body, loopConfigFromEnv(process.env));
   if (loop.blocked) {
     return res.status(429).json({
       error: "agent_loop_detected",
