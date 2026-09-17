@@ -1,5 +1,6 @@
 import { Env, TokenData, UsageData, revokeToken, getUsageStub } from "../types";
 import { PROVIDERS, resolveProvider, getProviderKey, calculateCost } from "../providers";
+import { enforceMaxTokens, checkAgentLoop, loopConfigFromEnv } from "../request-guards";
 
 // ============================================================
 // Simple in-memory rate limiter (per-isolate)
@@ -100,7 +101,25 @@ export async function handleProxy(request: Request, env: Env, ctx: ExecutionCont
     return Response.json({ error: "rate_limited", retry_after_seconds: 60 }, { status: 429 });
   }
 
-  // ── 9. Get real key + forward ──────────────────────────
+  // ── 9. Output-Limit (max_tokens_per_request) ────────────
+  const maxTokens = enforceMaxTokens(providerName, body, token.rules.max_tokens_per_request);
+  if (!maxTokens.ok) {
+    return Response.json(
+      { error: "max_tokens_exceeded", requested: maxTokens.requested, limit: maxTokens.limit },
+      { status: 400 }
+    );
+  }
+
+  // ── 10. Agent-Loop-Breaker (per-isolate) ────────────────
+  const loop = checkAgentLoop(tokenId, body, loopConfigFromEnv(env as unknown as Record<string, unknown>));
+  if (loop.blocked) {
+    return Response.json(
+      { error: "agent_loop_detected", repeats: loop.repeats, retry_after_seconds: loop.retry_after_seconds },
+      { status: 429 }
+    );
+  }
+
+  // ── 11. Get real key + forward ─────────────────────────
   const realKey = getProviderKey(providerName, env);
   if (!realKey) {
     return Response.json({ error: "key_not_configured", provider: providerName }, { status: 500 });
@@ -110,7 +129,7 @@ export async function handleProxy(request: Request, env: Env, ctx: ExecutionCont
   const isStream = body.stream === true;
 
   // Inject stream_options for OpenAI streaming
-  const forwardBody = { ...body };
+  const forwardBody = { ...maxTokens.body };
   if (isStream && providerName === "openai") {
     forwardBody.stream_options = { include_usage: true };
   }

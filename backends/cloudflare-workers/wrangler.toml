@@ -30,3 +30,6 @@ crons = ["*/5 * * * *"]
 # ── Environment ─────────────────────────────────────────────
 [vars]
 ENVIRONMENT = "production"
+# Agent-Loop-Breaker (optional, Default 5 / 120, 0 = aus)
+# AGENT_LOOP_MAX_IDENTICAL = "5"
+# AGENT_LOOP_WINDOW_SECONDS = "120"

@@ -31,7 +31,8 @@ llm-proxy-complete/
 │   │   │   │   ├── admin.ts           /admin/* — Token-CRUD, Usage
 │   │   │   │   └── session.ts         /v1/session — Adaptive Sessions
 │   │   │   ├── services/
-│   │   │   │   └── topic-profiler.ts  P90-Berechnung, Stats, Historie
+│   │   │   │   ├── topic-profiler.ts  P90-Berechnung, Stats, Historie
+│   │   │   │   └── request-guards.ts  max_tokens-Limit + Agent-Loop-Breaker
 │   │   │   ├── middleware/
 │   │   │   │   ├── auth.ts            Proxy + Admin Authentifizierung
 │   │   │   │   └── rate-limiter.ts    In-Memory Rate Limiter
@@ -52,6 +53,7 @@ llm-proxy-complete/
 │   │   │   ├── providers.ts           Provider-Adapter + Pricing
 │   │   │   ├── usage-counter.ts       Durable Object (atomare Zähler)
 │   │   │   ├── topic-profiler.ts      Adaptive Limits + Stats (KV)
+│   │   │   ├── request-guards.ts      max_tokens-Limit + Agent-Loop-Breaker
 │   │   │   └── handlers/
 │   │   │       ├── proxy.ts           Proxy mit TransformStream
 │   │   │       ├── admin.ts           Admin-API
@@ -66,7 +68,8 @@ llm-proxy-complete/
 │       │   ├── handlers/
 │       │   │   └── index.ts           Alle Routen in einem Handler
 │       │   ├── services/
-│       │   │   └── topic-profiler.ts  Adaptive Limits (DynamoDB)
+│       │   │   ├── topic-profiler.ts  Adaptive Limits (DynamoDB)
+│       │   │   └── request-guards.ts  max_tokens-Limit + Agent-Loop-Breaker
 │       │   ├── providers/
 │       │   │   └── index.ts           Provider-Adapter + Pricing
 │       │   └── utils/
@@ -91,6 +94,7 @@ llm-proxy-complete/
 - Selbstlernende Budgets via P90 + 10% Sicherheitsmarge
 - Vollständige Kostenanalyse pro Themenfeld (Min/Max/Ø/Median/P90)
 - Server-seitige TTL-Durchsetzung bei jedem Request + proaktiver Cron-Cleanup
+- Schutz vor unbegrenztem Verbrauch: `max_tokens_per_request` wird pro Request durchgesetzt, ein Agent-Loop-Breaker blockt identische Wiederholungs-Requests (429 `agent_loop_detected`)
 - Streaming-Support (GCP + Cloudflare)
 - Einheitliche API-Oberfläche über alle drei Backends
 - Electron PoC-Client zum Testen aller Funktionen

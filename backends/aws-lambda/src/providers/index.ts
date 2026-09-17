@@ -1,4 +1,4 @@
-import { PricingEntry } from "./types";
+import { PricingEntry } from "../types";
 
 export interface ProviderConfig {
   base_url: string;

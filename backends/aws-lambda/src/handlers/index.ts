@@ -1,14 +1,15 @@
 import { APIGatewayProxyEventV2, APIGatewayProxyResultV2, ScheduledEvent } from "aws-lambda";
-import { PROVIDERS, resolveProvider, calculateCost, buildChatUrl } from "./providers";
+import { PROVIDERS, resolveProvider, calculateCost, buildChatUrl } from "../providers";
 import {
   createToken, getToken, getUsage, deleteToken, listTokens,
   revokeToken, reactivateToken, trackUsage, recordFeedback, cleanupExpired, putItem,
-} from "./utils/dynamodb";
-import { getProviderKey, getAdminKey } from "./utils/secrets";
+} from "../utils/dynamodb";
+import { getProviderKey, getAdminKey, secretMatches } from "../utils/secrets";
 import {
   getOrCreateProfile, getProfile, calculateLimits, recordAndRecalculate,
   listAllProfiles, saveSessionMeta, getSessionMeta, SessionDatapoint,
-} from "./services/topic-profiler";
+} from "../services/topic-profiler";
+import { enforceMaxTokens, checkAgentLoop, loopConfigFromEnv } from "../services/request-guards";
 import { v4 as uuidv4 } from "uuid";
 
 // ============================================================
@@ -206,6 +207,16 @@ export async function handler(
     if (!checkRate(token.id, token.max_requests_per_min))
       return json({ error: "rate_limited", retry_after_seconds: 60 }, 429);
 
+    // Output-Limit (max_tokens_per_request)
+    const maxTokens = enforceMaxTokens(providerName, body, token.max_tokens_per_request);
+    if (!maxTokens.ok)
+      return json({ error: "max_tokens_exceeded", requested: maxTokens.requested, limit: maxTokens.limit }, 400);
+
+    // Agent-Loop-Breaker (in-memory, per Lambda instance)
+    const loop = checkAgentLoop(token.id, body, loopConfigFromEnv(process.env));
+    if (loop.blocked)
+      return json({ error: "agent_loop_detected", repeats: loop.repeats, retry_after_seconds: loop.retry_after_seconds }, 429);
+
     // Get real key
     let realKey: string;
     try { realKey = await getProviderKey(providerName); }
@@ -213,7 +224,7 @@ export async function handler(
 
     // Forward request
     const provider = PROVIDERS[providerName];
-    const forwardBody = { ...body };
+    const forwardBody = { ...maxTokens.body };
     // Lambda doesn't support response streaming via API Gateway
     forwardBody.stream = false;
 
@@ -266,7 +277,7 @@ export async function handler(
     try { adminKey = await getAdminKey(); }
     catch { return json({ error: "admin_key_not_configured" }, 500); }
 
-    if (auth !== `Bearer ${adminKey}`) return json({ error: "unauthorized" }, 401);
+    if (!auth.startsWith("Bearer ") || !secretMatches(auth.slice(7), adminKey)) return json({ error: "unauthorized" }, 401);
 
     // POST /admin/tokens
     if (method === "POST" && path === "/admin/tokens") {

@@ -1,4 +1,4 @@
-import { Env, TokenData, UsageData, revokeToken, getUsageStub, getUsage, generateTokenId } from "../types";
+import { Env, TokenData, UsageData, revokeToken, getUsageStub, getUsage, generateTokenId, isAdminAuthorized } from "../types";
 
 // ============================================================
 // Admin route handler
@@ -10,8 +10,7 @@ export async function handleAdmin(
   path: string
 ): Promise<Response> {
   // Auth check
-  const auth = request.headers.get("Authorization");
-  if (auth !== `Bearer ${env.ADMIN_KEY}`) {
+  if (!(await isAdminAuthorized(request, env))) {
     return Response.json({ error: "unauthorized" }, { status: 401 });
   }
 

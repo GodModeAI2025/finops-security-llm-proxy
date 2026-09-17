@@ -1,4 +1,4 @@
-import { Env, TokenData, UsageData, revokeToken, getUsage, generateTokenId } from "../types";
+import { Env, TokenData, UsageData, revokeToken, getUsage, generateTokenId, isAdminAuthorized } from "../types";
 import {
   getOrCreateProfile,
   getProfile,
@@ -163,8 +163,7 @@ export async function handleSession(request: Request, env: Env, path: string): P
 
 export async function handleTopicAdmin(request: Request, env: Env, path: string): Promise<Response> {
   // Auth check
-  const auth = request.headers.get("Authorization");
-  if (auth !== `Bearer ${env.ADMIN_KEY}`) {
+  if (!(await isAdminAuthorized(request, env))) {
     return Response.json({ error: "unauthorized" }, { status: 401 });
   }
 
