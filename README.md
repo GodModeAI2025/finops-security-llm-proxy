@@ -33,7 +33,8 @@ llm-proxy-complete/
 │   │   │   ├── services/
 │   │   │   │   ├── topic-profiler.ts  P90-Berechnung, Stats, Historie
 │   │   │   │   ├── request-guards.ts  max_tokens-Limit + Agent-Loop-Breaker
-│   │   │   │   └── stream-usage.ts    Usage-Erfassung aus SSE-Streams
+│   │   │   │   ├── stream-usage.ts    Usage-Erfassung aus SSE-Streams
+│   │   │   │   └── provider-request.ts Ziel-URL + Forward-Body je Provider
 │   │   │   ├── middleware/
 │   │   │   │   ├── auth.ts            Proxy + Admin Authentifizierung
 │   │   │   │   └── rate-limiter.ts    In-Memory Rate Limiter
@@ -56,6 +57,7 @@ llm-proxy-complete/
 │   │   │   ├── topic-profiler.ts      Adaptive Limits + Stats (KV)
 │   │   │   ├── request-guards.ts      max_tokens-Limit + Agent-Loop-Breaker
 │   │   │   ├── stream-usage.ts        Usage-Erfassung aus SSE-Streams
+│   │   │   ├── provider-request.ts    Ziel-URL + Forward-Body je Provider
 │   │   │   └── handlers/
 │   │   │       ├── proxy.ts           Proxy mit TransformStream
 │   │   │       ├── admin.ts           Admin-API
@@ -71,7 +73,8 @@ llm-proxy-complete/
 │       │   │   └── index.ts           Alle Routen in einem Handler
 │       │   ├── services/
 │       │   │   ├── topic-profiler.ts  Adaptive Limits (DynamoDB)
-│       │   │   └── request-guards.ts  max_tokens-Limit + Agent-Loop-Breaker
+│       │   │   ├── request-guards.ts  max_tokens-Limit + Agent-Loop-Breaker
+│       │   │   └── provider-request.ts Ziel-URL + Forward-Body je Provider
 │       │   ├── providers/
 │       │   │   └── index.ts           Provider-Adapter + Pricing
 │       │   └── utils/
@@ -98,6 +101,7 @@ llm-proxy-complete/
 - Server-seitige TTL-Durchsetzung bei jedem Request + proaktiver Cron-Cleanup
 - Schutz vor unbegrenztem Verbrauch: `max_tokens_per_request` wird pro Request durchgesetzt, ein Agent-Loop-Breaker blockt identische Wiederholungs-Requests (429 `agent_loop_detected`)
 - Streaming-Support (GCP + Cloudflare) — die Usage wird dabei über Chunk-Grenzen hinweg aus dem SSE-Stream gelesen, damit Budget und Auto-Revocation auch bei Streams greifen
+- Google/Gemini-Routing: Modell wird in den Pfad eingesetzt, Streams gehen an `:streamGenerateContent?alt=sse`, Proxy-Felder (`model`, `stream`) werden aus dem Body entfernt. Requests im falschen Format werden mit 400 `google_body_format` abgelehnt, statt beim Provider zu scheitern
 - Einheitliche API-Oberfläche über alle drei Backends
 - Electron PoC-Client zum Testen aller Funktionen
 

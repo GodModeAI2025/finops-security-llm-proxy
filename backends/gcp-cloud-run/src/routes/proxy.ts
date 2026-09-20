@@ -11,6 +11,7 @@ import { checkRateLimit } from "../middleware/rate-limiter";
 import { proxyAuth } from "../middleware/auth";
 import { enforceMaxTokens, checkAgentLoop, loopConfigFromEnv } from "../services/request-guards";
 import { createStreamUsageAccumulator } from "../services/stream-usage";
+import { buildTargetUrl, buildForwardBody, checkProviderBody } from "../services/provider-request";
 
 const router = Router();
 
@@ -108,7 +109,13 @@ router.post("/v1/chat", proxyAuth, async (req: Request, res: Response) => {
     });
   }
 
-  // ── 8. Get real API key ──────────────────────────────────
+  // ── 8. Body-Format des Providers prüfen ──────────────────
+  const bodyCheck = checkProviderBody(providerName, maxTokens.body);
+  if (!bodyCheck.ok) {
+    return res.status(400).json({ error: bodyCheck.error, message: bodyCheck.message });
+  }
+
+  // ── 9. Get real API key ──────────────────────────────────
   let realApiKey: string;
   try {
     realApiKey = await getProviderKey(providerName);
@@ -120,15 +127,11 @@ router.post("/v1/chat", proxyAuth, async (req: Request, res: Response) => {
     });
   }
 
-  // ── 9. Forward request ───────────────────────────────────
+  // ── 10. Forward request ──────────────────────────────────
   const isStream = body.stream === true;
-  const targetUrl = `${providerConfig.base_url}${providerConfig.chat_path}`;
-
-  // For streaming with OpenAI, inject stream_options to get usage data
-  const forwardBody = { ...maxTokens.body };
-  if (isStream && providerName === "openai") {
-    forwardBody.stream_options = { include_usage: true };
-  }
+  // Pfad-Platzhalter ({model}) und provider-eigene Body-Regeln, siehe provider-request.ts
+  const targetUrl = buildTargetUrl(providerName, providerConfig.base_url, providerConfig.chat_path, model, isStream);
+  const forwardBody = buildForwardBody(providerName, maxTokens.body, isStream);
 
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
