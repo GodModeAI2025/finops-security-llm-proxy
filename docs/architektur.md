@@ -129,7 +129,20 @@ kosten = (input_tokens × input_per_1m + output_tokens × output_per_1m) / 1.000
 
 Genauigkeit: 95-100%. Einzige Fehlerquelle ist eine veraltete Preistabelle.
 
-Bei Streaming liefern beide Provider die Usage-Daten im letzten Event. Bei Stream-Abbruch wird eine konservative Schätzung als Reservierung verbucht.
+Bei Streaming stehen die Zahlen in den SSE-Events des Providers. `services/stream-usage.ts` (GCP) bzw. `stream-usage.ts` (Workers) puffert den Stream zeilenweise und sammelt sie ein:
+
+| Provider | Input-Tokens | Output-Tokens |
+|---|---|---|
+| Anthropic | `message_start` → `message.usage.input_tokens` | `message_delta` → `usage.output_tokens` |
+| OpenAI | letzter Chunk mit `usage` (nur mit `stream_options.include_usage`, wird vom Proxy gesetzt) | dito, `completion_tokens` |
+| Google | Chunk mit `usageMetadata.promptTokenCount` | `usageMetadata.candidatesTokenCount` |
+
+Zwei Punkte sind dabei wichtig:
+
+- Eine SSE-Zeile kann über zwei Netzwerk-Chunks verteilt ankommen. Wer je Chunk parst, verliert die Usage des gesamten Streams und bucht 0 Kosten. Deshalb wird über Chunk-Grenzen hinweg gepuffert und erst bei `\n` ausgewertet.
+- Anthropic verteilt Input- und Output-Tokens auf zwei verschiedene Events. Wer nur `message_delta` liest, bucht die Input-Tokens mit 0.
+
+Bricht der Stream vorzeitig ab und fehlen die Input-Tokens, wird wie bisher konservativ geschätzt (~4 Zeichen pro Token). Cache-Tokens (`cache_read_input_tokens`, `cache_creation_input_tokens`) werden — wie im Nicht-Stream-Pfad — nicht separat bepreist.
 
 ## Auto-Revocation-Regeln
 

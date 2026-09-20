@@ -1,6 +1,7 @@
 import { Env, TokenData, UsageData, revokeToken, getUsageStub } from "../types";
 import { PROVIDERS, resolveProvider, getProviderKey, calculateCost } from "../providers";
 import { enforceMaxTokens, checkAgentLoop, loopConfigFromEnv } from "../request-guards";
+import { createStreamUsageAccumulator } from "../stream-usage";
 
 // ============================================================
 // Simple in-memory rate limiter (per-isolate)
@@ -151,7 +152,8 @@ export async function handleProxy(request: Request, env: Env, ctx: ExecutionCont
       const writer = writable.getWriter();
       const reader = upstreamRes.body?.getReader();
       const decoder = new TextDecoder();
-      let streamedUsage: { input_tokens: number; output_tokens: number } | null = null;
+      // Usage wird über Chunk-Grenzen hinweg zeilenweise eingesammelt.
+      const usageAccumulator = createStreamUsageAccumulator(providerName);
 
       // Process in background — waitUntil ensures the worker doesn't shut down before tracking completes
       ctx.waitUntil((async () => {
@@ -162,12 +164,7 @@ export async function handleProxy(request: Request, env: Env, ctx: ExecutionCont
               if (done) break;
               await writer.write(value);
 
-              // Try parsing usage from chunks
-              const chunk = decoder.decode(value, { stream: true });
-              if (chunk.includes('"usage"') || chunk.includes('"message_delta"')) {
-                const parsed = provider.parse_usage?.(tryParseStreamChunk(chunk));
-                if (parsed) streamedUsage = parsed;
-              }
+              usageAccumulator.push(decoder.decode(value, { stream: true }));
             }
           }
         } catch (e) {
@@ -176,8 +173,11 @@ export async function handleProxy(request: Request, env: Env, ctx: ExecutionCont
           await writer.close();
 
           // Track usage
-          const inputTokens = streamedUsage?.input_tokens ?? estimateTokens(body);
-          const outputTokens = streamedUsage?.output_tokens ?? 0;
+          usageAccumulator.flush();
+          const streamedUsage = usageAccumulator.result();
+          // Fehlt die Input-Angabe (abgebrochener Stream, unbekannter Provider), wird geschätzt.
+          const inputTokens = streamedUsage.input_tokens || estimateTokens(body);
+          const outputTokens = streamedUsage.output_tokens;
           const cost = calculateCost(model, inputTokens, outputTokens);
 
           const trackRes = await doStub.fetch(
@@ -255,16 +255,6 @@ export async function handleProxy(request: Request, env: Env, ctx: ExecutionCont
 
 function estimateTokens(body: any): number {
   return Math.ceil(JSON.stringify(body.messages ?? body).length / 4);
-}
-
-function tryParseStreamChunk(chunk: string): any {
-  const lines = chunk.split("\n").filter((l) => l.startsWith("data: ") && l !== "data: [DONE]");
-  for (const line of lines) {
-    try {
-      return JSON.parse(line.slice(6));
-    } catch {}
-  }
-  return {};
 }
 
 async function checkAutoRevoke(env: Env, token: TokenData, usage: UsageData): Promise<void> {

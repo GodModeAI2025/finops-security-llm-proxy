@@ -22,24 +22,6 @@ export const PROVIDERS: Record<string, ProviderConfig> = {
       }
       return null;
     },
-    parse_stream_usage: (chunk: string) => {
-      // Anthropic sends usage in message_stop event
-      if (chunk.includes('"type":"message_delta"') || chunk.includes('"type": "message_delta"')) {
-        try {
-          const lines = chunk.split("\n").filter((l) => l.startsWith("data: "));
-          for (const line of lines) {
-            const data = JSON.parse(line.slice(6));
-            if (data.type === "message_delta" && data.usage) {
-              return {
-                input_tokens: data.usage.input_tokens ?? 0,
-                output_tokens: data.usage.output_tokens ?? 0,
-              };
-            }
-          }
-        } catch {}
-      }
-      return null;
-    },
   },
 
   openai: {
@@ -55,24 +37,6 @@ export const PROVIDERS: Record<string, ProviderConfig> = {
           input_tokens: body.usage.prompt_tokens ?? 0,
           output_tokens: body.usage.completion_tokens ?? 0,
         };
-      }
-      return null;
-    },
-    parse_stream_usage: (chunk: string) => {
-      // OpenAI sends usage in the last chunk (when stream_options.include_usage is true)
-      if (chunk.includes('"usage"')) {
-        try {
-          const lines = chunk.split("\n").filter((l) => l.startsWith("data: ") && l !== "data: [DONE]");
-          for (const line of lines) {
-            const data = JSON.parse(line.slice(6));
-            if (data.usage) {
-              return {
-                input_tokens: data.usage.prompt_tokens ?? 0,
-                output_tokens: data.usage.completion_tokens ?? 0,
-              };
-            }
-          }
-        } catch {}
       }
       return null;
     },
@@ -94,7 +58,6 @@ export const PROVIDERS: Record<string, ProviderConfig> = {
       }
       return null;
     },
-    parse_stream_usage: (_chunk: string) => null,
   },
 };
 

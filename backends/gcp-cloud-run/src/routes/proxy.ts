@@ -10,6 +10,7 @@ import { getProviderKey } from "../utils/secrets";
 import { checkRateLimit } from "../middleware/rate-limiter";
 import { proxyAuth } from "../middleware/auth";
 import { enforceMaxTokens, checkAgentLoop, loopConfigFromEnv } from "../services/request-guards";
+import { createStreamUsageAccumulator } from "../services/stream-usage";
 
 const router = Router();
 
@@ -148,7 +149,8 @@ router.post("/v1/chat", proxyAuth, async (req: Request, res: Response) => {
       res.setHeader("Connection", "keep-alive");
       res.status(upstreamRes.status);
 
-      let streamUsage: { input_tokens: number; output_tokens: number } | null = null;
+      // Usage wird über Chunk-Grenzen hinweg zeilenweise eingesammelt.
+      const usageAccumulator = createStreamUsageAccumulator(providerName);
       const reader = upstreamRes.body?.getReader();
       const decoder = new TextDecoder();
 
@@ -160,10 +162,7 @@ router.post("/v1/chat", proxyAuth, async (req: Request, res: Response) => {
 
             const chunk = decoder.decode(value, { stream: true });
             res.write(chunk);
-
-            // Try to parse usage from stream chunks
-            const parsed = providerConfig.parse_stream_usage(chunk);
-            if (parsed) streamUsage = parsed;
+            usageAccumulator.push(chunk);
           }
         } catch (streamErr) {
           console.error("Stream read error:", streamErr);
@@ -171,11 +170,14 @@ router.post("/v1/chat", proxyAuth, async (req: Request, res: Response) => {
       }
 
       res.end();
+      usageAccumulator.flush();
+      const streamUsage = usageAccumulator.result();
 
       // Track usage after stream completes
       const pricing = await getPricing();
-      const inputTokens = streamUsage?.input_tokens ?? estimateInputTokens(body);
-      const outputTokens = streamUsage?.output_tokens ?? 0;
+      // Fehlt die Input-Angabe (abgebrochener Stream, unbekannter Provider), wird geschätzt.
+      const inputTokens = streamUsage.input_tokens || estimateInputTokens(body);
+      const outputTokens = streamUsage.output_tokens;
       const cost = calculateCost(model, inputTokens, outputTokens, pricing);
       const success = upstreamRes.status >= 200 && upstreamRes.status < 300;
 
