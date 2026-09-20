@@ -716,8 +716,11 @@ async function sendMessage() {
       log(`Request abgelehnt: ${JSON.stringify(err)}`, "warn");
       if (err.error === "google_body_format") {
         addMessage("error","Dieser Client spricht nur das OpenAI-/Anthropic-Format (messages). Gemini-Modelle erwarten das Gemini-Format (contents) — bitte ein Claude- oder GPT-Modell wählen.");
-      } else {
+      } else if (typeof err.error === "string") {
         addMessage("error",`Request abgelehnt: ${err.error} — ${err.message || ""}`);
+      } else {
+        // 400 des Providers wird unverändert durchgereicht — dort ist "error" ein Objekt.
+        addMessage("error",`Request abgelehnt:\n${JSON.stringify(err, null, 2)}`);
       }
       sendBtnEl.disabled = false;
       return;
