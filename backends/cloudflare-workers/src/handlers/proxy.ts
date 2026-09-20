@@ -170,7 +170,11 @@ export async function handleProxy(request: Request, env: Env, ctx: ExecutionCont
         } catch (e) {
           console.error("Stream error:", e);
         } finally {
-          await writer.close();
+          // Trennt der Client die Verbindung, ist die Writable-Seite bereits fehlerhaft und
+          // close() wirft. Ohne dieses catch würde die Abrechnung des Streams übersprungen.
+          try {
+            await writer.close();
+          } catch {}
 
           // Track usage
           usageAccumulator.flush();

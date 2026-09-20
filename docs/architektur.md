@@ -142,7 +142,7 @@ Zwei Punkte sind dabei wichtig:
 - Eine SSE-Zeile kann über zwei Netzwerk-Chunks verteilt ankommen. Wer je Chunk parst, verliert die Usage des gesamten Streams und bucht 0 Kosten. Deshalb wird über Chunk-Grenzen hinweg gepuffert und erst bei `\n` ausgewertet.
 - Anthropic verteilt Input- und Output-Tokens auf zwei verschiedene Events. Wer nur `message_delta` liest, bucht die Input-Tokens mit 0.
 
-Bricht der Stream vorzeitig ab und fehlen die Input-Tokens, wird wie bisher konservativ geschätzt (~4 Zeichen pro Token). Cache-Tokens (`cache_read_input_tokens`, `cache_creation_input_tokens`) werden — wie im Nicht-Stream-Pfad — nicht separat bepreist.
+Bricht der Stream vorzeitig ab und fehlen die Input-Tokens, wird wie bisher konservativ geschätzt (~4 Zeichen pro Token). Trennt der Client die Verbindung, wird der bis dahin erfasste Verbrauch trotzdem gebucht — der Provider stellt ihn ebenfalls in Rechnung. Cache-Tokens (`cache_read_input_tokens`, `cache_creation_input_tokens`) werden — wie im Nicht-Stream-Pfad — nicht separat bepreist.
 
 ## Auto-Revocation-Regeln
 
