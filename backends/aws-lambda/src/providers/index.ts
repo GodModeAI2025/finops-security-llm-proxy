@@ -49,10 +49,6 @@ export function resolveProvider(model: string): string | null {
   return null;
 }
 
-export function buildChatUrl(provider: ProviderConfig, model: string): string {
-  return `${provider.base_url}${provider.chat_path.replace("{model}", model)}`;
-}
-
 export function calculateCost(model: string, inputTokens: number, outputTokens: number): number {
   const p = PRICING[model];
   if (!p) return 0;

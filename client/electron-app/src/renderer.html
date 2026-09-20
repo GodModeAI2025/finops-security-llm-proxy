@@ -711,6 +711,18 @@ async function sendMessage() {
       return;
     }
 
+    if (res.status === 400) {
+      const err = await res.json();
+      log(`Request abgelehnt: ${JSON.stringify(err)}`, "warn");
+      if (err.error === "google_body_format") {
+        addMessage("error","Dieser Client spricht nur das OpenAI-/Anthropic-Format (messages). Gemini-Modelle erwarten das Gemini-Format (contents) — bitte ein Claude- oder GPT-Modell wählen.");
+      } else {
+        addMessage("error",`Request abgelehnt: ${err.error} — ${err.message || ""}`);
+      }
+      sendBtnEl.disabled = false;
+      return;
+    }
+
     const data = await res.json();
 
     const usageHeader = res.headers.get("X-Proxy-Usage");

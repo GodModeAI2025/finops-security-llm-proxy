@@ -2,6 +2,7 @@ import { Env, TokenData, UsageData, revokeToken, getUsageStub } from "../types";
 import { PROVIDERS, resolveProvider, getProviderKey, calculateCost } from "../providers";
 import { enforceMaxTokens, checkAgentLoop, loopConfigFromEnv } from "../request-guards";
 import { createStreamUsageAccumulator } from "../stream-usage";
+import { buildTargetUrl, buildForwardBody, checkProviderBody } from "../provider-request";
 
 // ============================================================
 // Simple in-memory rate limiter (per-isolate)
@@ -120,7 +121,13 @@ export async function handleProxy(request: Request, env: Env, ctx: ExecutionCont
     );
   }
 
-  // ── 11. Get real key + forward ─────────────────────────
+  // ── 11. Body-Format des Providers prüfen ───────────────
+  const bodyCheck = checkProviderBody(providerName, maxTokens.body);
+  if (!bodyCheck.ok) {
+    return Response.json({ error: bodyCheck.error, message: bodyCheck.message }, { status: 400 });
+  }
+
+  // ── 12. Get real key + forward ─────────────────────────
   const realKey = getProviderKey(providerName, env);
   if (!realKey) {
     return Response.json({ error: "key_not_configured", provider: providerName }, { status: 500 });
@@ -129,13 +136,9 @@ export async function handleProxy(request: Request, env: Env, ctx: ExecutionCont
   const provider = PROVIDERS[providerName];
   const isStream = body.stream === true;
 
-  // Inject stream_options for OpenAI streaming
-  const forwardBody = { ...maxTokens.body };
-  if (isStream && providerName === "openai") {
-    forwardBody.stream_options = { include_usage: true };
-  }
-
-  const targetUrl = `${provider.base_url}${provider.chat_path}`;
+  // Pfad-Platzhalter ({model}) und provider-eigene Body-Regeln, siehe provider-request.ts
+  const targetUrl = buildTargetUrl(providerName, provider.base_url, provider.chat_path, model, isStream);
+  const forwardBody = buildForwardBody(providerName, maxTokens.body, isStream);
 
   try {
     const upstreamRes = await fetch(targetUrl, {
