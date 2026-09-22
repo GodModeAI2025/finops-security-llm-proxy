@@ -114,10 +114,29 @@ Cronjob alle 5 Minuten: `POST /admin/cleanup` an den Cloud Run Service. Revoked 
 3. **Regeln prüfen** — TTL abgelaufen? Budget überschritten? Rate-Limit erreicht? → 403/429
 4. **Provider auflösen** — Ist der angefragte Provider/Modell erlaubt? Echten API-Key aus Secret Manager laden.
    Vorher greifen die Request-Guards: Output-Limit über `max_tokens_per_request` (400) und Agent-Loop-Breaker (429).
-5. **Request weiterleiten** — Header umschreiben (`Bearer ptk_...` → `Bearer sk-ant-...`), Body 1:1 durchreichen. Streaming wird transparent durchgereicht.
+5. **Request weiterleiten** — Header umschreiben (`Bearer ptk_...` → `Bearer sk-ant-...`), Body 1:1 durchreichen. Streaming wird transparent durchgereicht. Ziel-URL und Forward-Body baut `provider-request.ts` (siehe „Provider-Besonderheiten").
 6. **Response evaluieren** — HTTP 200 → `fail_streak = 0`. HTTP 4xx/5xx oder leere Antwort → `fail_streak++`.
 7. **Usage tracken** — Firestore Transaction: `total_requests++`, `total_cost_usd += berechnete_kosten`. Prüfen ob Auto-Revoke-Regeln greifen.
 8. **Response zurück** — Original LLM-Response an Client, optional mit `X-Proxy-Usage` Header.
+
+## Provider-Besonderheiten
+
+Der Proxy übersetzt Request-Bodys nicht — jeder Client spricht das Format seines Providers. Bei der Ziel-URL und beim Forward-Body laufen die Provider trotzdem auseinander; sie liegen gebündelt in `provider-request.ts` (in allen drei Backends identisch).
+
+| Provider | Pfad | Body |
+|---|---|---|
+| Anthropic | `/v1/messages`, fest | unverändert |
+| OpenAI | `/v1/chat/completions`, fest | bei `stream: true` wird `stream_options.include_usage` gesetzt, damit die Usage im letzten Chunk mitkommt |
+| Google | `/v1beta/models/{model}:generateContent` — `{model}` wird durch das angefragte Modell ersetzt (URL-kodiert); bei `stream: true` stattdessen `:streamGenerateContent?alt=sse` | `model` und `stream`/`stream_options` werden entfernt |
+
+Zu Google im Einzelnen:
+
+- **Das Modell steht im Pfad.** Bleibt der Platzhalter stehen, antwortet Google mit `404 models/%7Bmodel%7D is not found`.
+- **Gemini kennt die Proxy-Felder nicht.** Das Modell gehört in den Pfad, `stream` in die Methode; beide im Body würden mit `400 INVALID_ARGUMENT — Invalid JSON payload received. Unknown name "model"` abgelehnt. Sie werden deshalb vor dem Weiterleiten entfernt.
+- **`:generateContent` streamt nicht.** Es liefert die komplette Antwort am Stück, also keine SSE-Events und damit auch keine `usageMetadata` für die Stream-Erfassung. Gestreamte Requests gehen an `:streamGenerateContent?alt=sse`.
+- **Das Request-Format ist ein anderes.** Google erwartet `contents` (plus optional `generationConfig`, `systemInstruction`, `tools`) statt `messages`. Ein Request an ein `gemini-*`-Modell ohne nicht-leeres `contents` wird direkt mit `400 google_body_format` abgelehnt, bevor ein Provider-Call entsteht — sonst würde der Provider-Fehler als fehlgeschlagener Request verbucht und im Streaming-Pfad sogar mit geschätzten Input-Tokens bepreist, obwohl das Modell nie erreicht wurde.
+
+Der Electron-PoC-Client schickt ausschließlich OpenAI-förmige Bodys (`messages`) und kann Gemini-Modelle deshalb nicht bedienen; er zeigt die Meldung des Proxys an.
 
 ## Kostenberechnung
 
@@ -129,7 +148,20 @@ kosten = (input_tokens × input_per_1m + output_tokens × output_per_1m) / 1.000
 
 Genauigkeit: 95-100%. Einzige Fehlerquelle ist eine veraltete Preistabelle.
 
-Bei Streaming liefern beide Provider die Usage-Daten im letzten Event. Bei Stream-Abbruch wird eine konservative Schätzung als Reservierung verbucht.
+Bei Streaming stehen die Zahlen in den SSE-Events des Providers. `services/stream-usage.ts` (GCP) bzw. `stream-usage.ts` (Workers) puffert den Stream zeilenweise und sammelt sie ein:
+
+| Provider | Input-Tokens | Output-Tokens |
+|---|---|---|
+| Anthropic | `message_start` → `message.usage.input_tokens` | `message_delta` → `usage.output_tokens` |
+| OpenAI | letzter Chunk mit `usage` (nur mit `stream_options.include_usage`, wird vom Proxy gesetzt) | dito, `completion_tokens` |
+| Google | Chunk mit `usageMetadata.promptTokenCount` | `usageMetadata.candidatesTokenCount` |
+
+Zwei Punkte sind dabei wichtig:
+
+- Eine SSE-Zeile kann über zwei Netzwerk-Chunks verteilt ankommen. Wer je Chunk parst, verliert die Usage des gesamten Streams und bucht 0 Kosten. Deshalb wird über Chunk-Grenzen hinweg gepuffert und erst bei `\n` ausgewertet.
+- Anthropic verteilt Input- und Output-Tokens auf zwei verschiedene Events. Wer nur `message_delta` liest, bucht die Input-Tokens mit 0.
+
+Bricht der Stream vorzeitig ab und fehlen die Input-Tokens, wird wie bisher konservativ geschätzt (~4 Zeichen pro Token). Trennt der Client die Verbindung, wird der bis dahin erfasste Verbrauch trotzdem gebucht — der Provider stellt ihn ebenfalls in Rechnung. Cache-Tokens (`cache_read_input_tokens`, `cache_creation_input_tokens`) werden — wie im Nicht-Stream-Pfad — nicht separat bepreist.
 
 ## Auto-Revocation-Regeln
 
@@ -142,6 +174,7 @@ Nach jedem Request prüft der Proxy:
 | Fehlerquote | `fail_streak >= max_fail_streak` | Revoke mit Grund `fail_streak_exceeded` |
 | Rate-Limit | Requests/Min > `max_requests_per_min` | Request ablehnen (429), kein Revoke |
 | Output-Limit | Angefragte Output-Tokens > `max_tokens_per_request` | Request ablehnen (400 `max_tokens_exceeded`), kein Revoke. Fehlt die Angabe im Request, setzt der Proxy das Limit (`max_tokens` / `max_completion_tokens` / `generationConfig.maxOutputTokens`) |
+| Body-Format | Google-Request ohne `contents` | Request ablehnen (400 `google_body_format`), kein Revoke, nicht an den Provider weitergeleitet |
 | Agent-Loop | Mehr als 5 identische Request-Bodies (ohne `stream`-Felder) pro Token innerhalb von 120 s (konfigurierbar) | Request ablehnen (429 `agent_loop_detected`, mit `retry_after_seconds`), kein Revoke, nicht an den Provider weitergeleitet |
 
 Der Loop-Breaker adressiert hängende Agenten, die denselben Prompt endlos wiederholen (OWASP LLM "Unbounded Consumption").

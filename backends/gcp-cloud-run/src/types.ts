@@ -55,7 +55,6 @@ export interface ProviderConfig {
   chat_path: string;
   auth_header: (key: string) => Record<string, string>;
   parse_usage: (body: any) => { input_tokens: number; output_tokens: number } | null;
-  parse_stream_usage: (chunk: string) => { input_tokens: number; output_tokens: number } | null;
 }
 
 export interface PricingEntry {

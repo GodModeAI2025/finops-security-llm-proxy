@@ -1,5 +1,5 @@
 import { APIGatewayProxyEventV2, APIGatewayProxyResultV2, ScheduledEvent } from "aws-lambda";
-import { PROVIDERS, resolveProvider, calculateCost, buildChatUrl } from "../providers";
+import { PROVIDERS, resolveProvider, calculateCost } from "../providers";
 import {
   createToken, getToken, getUsage, deleteToken, listTokens,
   revokeToken, reactivateToken, trackUsage, recordFeedback, cleanupExpired, putItem,
@@ -10,6 +10,7 @@ import {
   listAllProfiles, saveSessionMeta, getSessionMeta, SessionDatapoint,
 } from "../services/topic-profiler";
 import { enforceMaxTokens, checkAgentLoop, loopConfigFromEnv } from "../services/request-guards";
+import { buildTargetUrl, buildForwardBody, checkProviderBody } from "../services/provider-request";
 import { v4 as uuidv4 } from "uuid";
 
 // ============================================================
@@ -217,6 +218,10 @@ export async function handler(
     if (loop.blocked)
       return json({ error: "agent_loop_detected", repeats: loop.repeats, retry_after_seconds: loop.retry_after_seconds }, 429);
 
+    // Body-Format des Providers prüfen
+    const bodyCheck = checkProviderBody(providerName, maxTokens.body);
+    if (!bodyCheck.ok) return json({ error: bodyCheck.error, message: bodyCheck.message }, 400);
+
     // Get real key
     let realKey: string;
     try { realKey = await getProviderKey(providerName); }
@@ -224,12 +229,13 @@ export async function handler(
 
     // Forward request
     const provider = PROVIDERS[providerName];
-    const forwardBody = { ...maxTokens.body };
-    // Lambda doesn't support response streaming via API Gateway
-    forwardBody.stream = false;
+    // Lambda doesn't support response streaming via API Gateway.
+    // buildForwardBody entfernt bei Google die Proxy-Felder (model, stream), die die
+    // Gemini-REST-API mit 400 ablehnen würde — siehe provider-request.ts.
+    const forwardBody = buildForwardBody(providerName, { ...maxTokens.body, stream: false }, false);
 
     try {
-      const targetUrl = buildChatUrl(provider, model);
+      const targetUrl = buildTargetUrl(providerName, provider.base_url, provider.chat_path, model, false);
       const upstreamRes = await fetch(targetUrl, {
         method: "POST",
         headers: { "Content-Type": "application/json", ...provider.auth_header(realKey) },
